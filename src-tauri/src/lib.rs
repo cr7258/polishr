@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+mod ax_text;
 mod commands;
 mod tray;
 
@@ -13,25 +15,43 @@ pub fn run() {
                 .with_shortcuts(["alt+super+KeyP"])
                 .expect("Failed to register shortcuts")
                 .with_handler(|app, _shortcut, event| {
-                    // We only registered one shortcut, so any event is Cmd+Option+P
                     if event.state == ShortcutState::Pressed {
-                        println!("[Polishr] Cmd+Option+P pressed! Capturing selection...");
+                        println!("[Polishr] Cmd+Option+P pressed!");
                         let handle = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            match commands::capture_selection(handle.clone()).await {
-                                Ok(text) => {
-                                    println!("[Polishr] Selection captured: {} chars", text.len());
-                                    let _ = handle.emit("selection-captured", text);
+                            match commands::capture_and_locate().await {
+                                Ok(result) => {
+                                    println!(
+                                        "[Polishr] Captured {} chars at ({}, {})",
+                                        result.text.len(),
+                                        result.x,
+                                        result.y
+                                    );
+
+                                    // Position the floating panel near the selection
+                                    if let Some(window) = handle.get_webview_window("main") {
+                                        // Place the panel below the selection
+                                        let panel_x = result.x;
+                                        // On macOS, AX API gives coordinates from top-left of screen
+                                        let panel_y = result.y + result.height + 8.0;
+
+                                        let pos = tauri::LogicalPosition::new(panel_x, panel_y);
+                                        let _ = window.set_position(tauri::Position::Logical(pos));
+                                        let _ = window.show();
+                                        // NOTE: Do NOT call set_focus() here — keep the original app
+                                        // focused so it retains the text selection. The user can
+                                        // click on the panel when ready (which will naturally focus it).
+                                    }
+
+                                    let _ = handle.emit("selection-captured", result);
                                 }
                                 Err(err) => {
-                                    println!("[Polishr] Failed to capture selection: {}", err);
-                                    // Emit error event so frontend can handle it
+                                    println!("[Polishr] Capture failed: {}", err);
                                     let _ = handle.emit("capture-error", err.clone());
-                                    // Show the window
+                                    // Still show the window at a reasonable position
                                     if let Some(window) = handle.get_webview_window("main") {
+                                        let _ = window.center();
                                         let _ = window.show();
-                                        let _ = window.unminimize();
-                                        let _ = window.set_focus();
                                     }
                                 }
                             }
@@ -40,10 +60,9 @@ pub fn run() {
                 })
                 .build(),
         )
-        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
-            println!("[Polishr] App started. Global shortcut: Cmd+Option+P (macOS) / Ctrl+Alt+P (Win/Linux)");
+            println!("[Polishr] App started. Global shortcut: Cmd+Option+P");
 
             // Create system tray
             tray::create_tray(app.handle())?;
@@ -51,12 +70,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::capture_selection,
-            commands::replace_selection,
+            commands::capture_and_locate,
+            commands::replace_text,
+            commands::dismiss,
             commands::check_accessibility_permission,
         ])
         .on_window_event(|window, event| {
-            // Minimize to tray on close instead of quitting
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();

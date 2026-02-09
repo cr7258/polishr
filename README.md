@@ -1,45 +1,37 @@
 # Polishr
 
-A desktop app for grammar polishing and translation. Select text in any app, press a hotkey, and replace it with polished results powered by LLM.
+A Grammarly-like desktop app for grammar polishing and translation. Select text in any app, press a hotkey, and a compact floating panel appears with polished results — accept to replace in-place.
 
 **Features:**
 - Polish English -- fix grammar, spelling, punctuation, improve clarity
 - Polish Chinese -- fix Chinese grammar, remove redundancy, improve expression
 - Translate CN to EN -- translate Chinese to natural, polished English
-- System-wide text replacement -- works in any app via global hotkey
+- System-wide floating panel -- works in any app via global hotkey + macOS Accessibility API
+- Direct text replacement -- no clipboard manipulation, text is read/written via AX API
 
 ## Architecture
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#e3f2fd', 'primaryTextColor': '#0d47a1', 'primaryBorderColor': '#64b5f6', 'lineColor': '#42a5f5', 'secondaryColor': '#fce4ec', 'tertiaryColor': '#f3e5f5'}}}%%
-flowchart LR
-    User("👤 User selects text<br/>in any app"):::userNode
-    Hotkey("⌨️ Global Hotkey<br/>Cmd+Option+P"):::hotkeyNode
-    Rust("🦀 Tauri Rust Backend<br/>enigo + clipboard"):::rustNode
-    React("⚛️ React Frontend<br/>WebView"):::reactNode
-    LLM("🤖 OpenAI-Compatible<br/>API"):::llmNode
+sequenceDiagram
+    participant User
+    participant Shortcut as Global Hotkey
+    participant AX as AX API (Rust)
+    participant Panel as Floating Panel
+    participant LLM as LLM API
 
-    User e1@--> Hotkey
-    Hotkey e2@--> Rust
-    Rust e3@-->|"simulate Cmd+C<br/>read clipboard"| React
-    React e4@-->|"stream request"| LLM
-    LLM e5@-->|"SSE tokens"| React
-    React e6@-->|"polished text"| Rust
-    Rust e7@-->|"write clipboard<br/>simulate Cmd+V"| User
-
-    e1@{ animate: true }
-    e2@{ animate: true }
-    e3@{ animate: true }
-    e4@{ animate: true }
-    e5@{ animate: true }
-    e6@{ animate: true }
-    e7@{ animate: true }
-
-    classDef userNode fill:#e8f5e9,stroke:#66bb6a,stroke-width:2px,color:#1b5e20
-    classDef hotkeyNode fill:#fff3e0,stroke:#ffb74d,stroke-width:2px,color:#e65100
-    classDef rustNode fill:#fce4ec,stroke:#f06292,stroke-width:2px,color:#880e4f
-    classDef reactNode fill:#e3f2fd,stroke:#64b5f6,stroke-width:2px,color:#0d47a1
-    classDef llmNode fill:#f3e5f5,stroke:#ce93d8,stroke-width:2px,color:#4a148c
+    User->>Shortcut: Cmd+Option+P
+    Shortcut->>AX: Get focused element
+    AX->>AX: Read AXSelectedText
+    AX->>AX: Read AXBoundsForRange
+    AX-->>Panel: text + screen position
+    Panel->>Panel: Show near selection
+    Panel->>LLM: Stream polish request
+    LLM-->>Panel: SSE tokens
+    Panel->>Panel: Display diff
+    User->>Panel: Click Accept
+    Panel->>AX: Set AXSelectedText
+    AX-->>User: Text replaced in-place
 ```
 
 ### Project Structure
@@ -48,7 +40,7 @@ flowchart LR
 %%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#e3f2fd', 'primaryTextColor': '#0d47a1', 'primaryBorderColor': '#64b5f6', 'lineColor': '#42a5f5', 'secondaryColor': '#fce4ec', 'tertiaryColor': '#f3e5f5'}}}%%
 flowchart TB
     subgraph frontend ["src/ — React Frontend"]
-        components["components/ — React UI"]:::reactNode
+        App["App.tsx — Floating panel UI"]:::reactNode
         hooks["hooks/ — usePolish, useSettings"]:::hookNode
     end
 
@@ -59,22 +51,25 @@ flowchart TB
     end
 
     subgraph backend ["src-tauri/ — Rust Backend"]
+        ax["ax_text.rs — macOS AX API FFI"]:::rustNode
         commands["commands.rs — capture & replace"]:::rustNode
         tray["tray.rs — System tray"]:::rustNode
-        lib["lib.rs — Plugin init"]:::rustNode
+        lib["lib.rs — Plugin init + hotkey"]:::rustNode
     end
 
-    OS["OS Keyboard + Clipboard"]:::osNode
+    AX_API["macOS Accessibility API"]:::osNode
 
-    components e1@--> hooks
+    App e1@--> hooks
     hooks e2@--> core
     hooks e3@-->|"invoke()"| commands
-    commands e4@-->|"enigo"| OS
+    commands e4@--> ax
+    ax e5@-->|"FFI"| AX_API
 
     e1@{ animate: true }
     e2@{ animate: true }
     e3@{ animate: true, animation: slow }
     e4@{ animate: true, animation: slow }
+    e5@{ animate: true, animation: slow }
 
     classDef reactNode fill:#e3f2fd,stroke:#64b5f6,stroke-width:2px,color:#0d47a1
     classDef hookNode fill:#fff3e0,stroke:#ffb74d,stroke-width:2px,color:#e65100
@@ -93,7 +88,7 @@ flowchart TB
 | Build tool | Vite |
 | LLM | OpenAI-compatible API (raw fetch + SSE) |
 | Diff | diff-match-patch |
-| Keyboard sim | enigo (Rust crate) |
+| Text access | macOS Accessibility API (AXUIElement FFI) |
 
 ## Local Development
 
@@ -102,7 +97,7 @@ flowchart TB
 - [Node.js](https://nodejs.org/) >= 18
 - [pnpm](https://pnpm.io/) >= 9
 - [Rust](https://rustup.rs/) >= 1.77
-- macOS / Windows / Linux
+- macOS (Accessibility API is macOS-only for now)
 
 ```bash
 # Install Rust (if not already installed)
@@ -141,12 +136,10 @@ pnpm tauri build
 
 Output:
 - macOS: `.dmg` and `.app` in `src-tauri/target/release/bundle/`
-- Windows: `.msi` and `.exe`
-- Linux: `.deb` and `.AppImage`
 
 ### Configuration
 
-On first launch, open Settings (gear icon in the title bar) and configure:
+On first launch, open Settings (gear icon in the floating panel) and configure:
 
 | Setting | Description | Example |
 |---------|-------------|---------|
@@ -159,7 +152,7 @@ Preset endpoints: **OpenAI**, **DeepSeek**, **Ollama** (local).
 
 ### macOS Accessibility Permission
 
-Polishr needs Accessibility access to simulate keyboard shortcuts (`Cmd+C` / `Cmd+V`) for the system-wide replace feature. On first use, grant permission in:
+Polishr needs Accessibility access to read and write selected text in other apps via the AX API. On first use, grant permission in:
 
 **System Settings > Privacy & Security > Accessibility > Enable Polishr**
 
@@ -174,8 +167,10 @@ Polishr needs Accessibility access to simulate keyboard shortcuts (`Cmd+C` / `Cm
 
 ## Usage
 
-1. **Direct editing**: Open Polishr, paste text, select a mode, click Polish
-2. **System-wide replace**: Select text in any app, press `Cmd+Option+P`, review the diff, click Replace
+1. Select text in any app
+2. Press `Cmd+Option+P`
+3. A floating panel appears near your selection with the polished result
+4. Click **Accept** to replace the text in-place, or **Dismiss** to close
 
 ## License
 

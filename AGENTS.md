@@ -10,7 +10,7 @@ Polishr is a Grammarly-like desktop application for grammar polishing and transl
 - **Polish Chinese**: Fix Chinese grammar, remove redundancy, improve expression
 - **Translate CN to EN**: Translate Chinese to natural, polished English
 
-The app runs as a system tray utility. Users select text in **any** application, press a global hotkey (`Cmd+Option+P`), and Polishr captures the text, polishes it via an LLM, and replaces it in-place.
+The app runs as a system tray utility with a floating panel UI. Users select text in **any** application, press a global hotkey (`Cmd+Option+P`), and a compact floating panel appears near the selection. The panel shows the polished result with inline diff. Clicking "Accept" replaces the text in-place by activating the original app and pasting from clipboard.
 
 ## Tech Stack
 
@@ -22,8 +22,9 @@ The app runs as a system tray utility. Users select text in **any** application,
 | Build tool | Vite |
 | LLM integration | OpenAI-compatible API via raw `fetch` + SSE streaming |
 | Diff engine | diff-match-patch |
-| Keyboard simulation | `enigo` crate (Rust, cross-platform) |
-| Tauri plugins | `global-shortcut`, `clipboard-manager`, `store` |
+| Text capture | macOS Accessibility API (`AXUIElement` FFI) — reads selected text |
+| Text replace | Clipboard + `osascript` Cmd+V — universally reliable |
+| Tauri plugins | `global-shortcut`, `store` |
 
 ## Project Structure
 
@@ -36,7 +37,7 @@ polishr/
 ├── AGENTS.md                     # This file - agent knowledge base
 ├── src/                          # React frontend
 │   ├── main.tsx                  # React entry point
-│   ├── App.tsx                   # Root component - wires everything together
+│   ├── App.tsx                   # Floating panel root component
 │   ├── vite-env.d.ts
 │   ├── lib/
 │   │   └── utils.ts              # cn() utility for class merging
@@ -53,28 +54,24 @@ polishr/
 │   │   └── diff/
 │   │       └── differ.ts         # computeDiff(), hasChanges()
 │   ├── components/
-│   │   ├── TitleBar.tsx          # Frameless window title bar with drag region
-│   │   ├── ModeSelector.tsx      # Polish EN / Polish ZH / CN->EN mode tabs
-│   │   ├── Editor.tsx            # Text input area with character count
 │   │   ├── DiffView.tsx          # Inline diff with color-coded changes
-│   │   ├── ResultPanel.tsx       # Bottom bar: Replace / Copy buttons
-│   │   ├── Settings.tsx          # API configuration modal
-│   │   └── AccessibilityGuide.tsx # macOS accessibility permission prompt
+│   │   └── Settings.tsx          # API configuration modal
 │   ├── hooks/
 │   │   ├── usePolish.ts          # Streaming polish state management
 │   │   └── useSettings.ts        # Settings persistence via tauri-plugin-store
 │   └── styles/
-│       └── globals.css           # TailwindCSS + design tokens (light/dark)
+│       └── globals.css           # TailwindCSS + design tokens (light/dark), transparent bg
 ├── src-tauri/                    # Rust backend
 │   ├── Cargo.toml
 │   ├── build.rs
-│   ├── tauri.conf.json           # Window config, plugins, bundle settings
+│   ├── tauri.conf.json           # Floating panel window config (transparent, always-on-top)
 │   ├── capabilities/
 │   │   └── default.json          # Plugin permissions
 │   └── src/
 │       ├── main.rs               # Entry point
-│       ├── lib.rs                # Tauri app setup, plugin init, window events
-│       ├── commands.rs           # capture_selection, replace_selection, check_accessibility_permission
+│       ├── lib.rs                # Tauri app setup, hotkey handler, window positioning
+│       ├── ax_text.rs            # macOS AX API FFI (read selected text, get bounds) + clipboard/paste helpers
+│       ├── commands.rs           # capture_and_locate, replace_text, dismiss, check_accessibility_permission
 │       └── tray.rs               # System tray icon and menu
 └── .cursor/
     └── rules/
@@ -83,28 +80,31 @@ polishr/
 
 ## Architecture Decisions
 
+### Why a hybrid AX API + clipboard approach?
+**Capture**: The AX API reads `kAXSelectedTextAttribute` directly from the focused UI element — instant and doesn't touch the clipboard. **Replace**: We tried `AXUIElementSetAttributeValue` for writes, but many apps (browsers, Electron apps) silently ignore it while returning success. The universally reliable approach is: copy replacement text to clipboard, activate the original app via `osascript`, and simulate `Cmd+V`. Both capture and replace require macOS Accessibility permission.
+
+### Why a floating panel instead of a full window?
+A small, transparent, always-on-top panel that appears near the selection mimics the Grammarly experience. The user stays in context — they can see their original text in the source app while reviewing the suggestion in the panel. The panel auto-polishes on capture and offers Accept/Dismiss.
+
 ### Why raw `fetch` instead of OpenAI SDK?
 The OpenAI SDK adds unnecessary weight and has Node.js-specific dependencies. Raw `fetch` + SSE parsing works in both Tauri WebView and browser extension contexts (for future extensibility). The client is ~60 lines of code.
 
 ### Why `src/core/` is separated?
 `src/core/` contains pure TypeScript with zero React or Tauri imports. This makes it extractable into a shared `packages/core` package when the browser extension is built later.
 
-### Why `enigo` for keyboard simulation?
-`enigo` is a mature cross-platform Rust crate for input simulation. It uses `CGEvent` on macOS, `SendInput` on Windows, and X11/Wayland on Linux. It requires macOS Accessibility permission.
-
-### System-wide replace flow
-1. User selects text in any app and presses `Cmd+Shift+P`
-2. Rust backend saves clipboard, simulates `Cmd+C`, reads clipboard to capture text
-3. Polishr window shows with captured text
-4. User clicks "Polish" -> LLM streams result -> diff displayed
-5. User clicks "Replace" -> result written to clipboard -> window hidden -> `Cmd+V` simulated
-6. Original clipboard content restored after paste
+### System-wide flow (current)
+1. User selects text in any app and presses `Cmd+Option+P`
+2. Rust backend records the frontmost app name, then uses AX API to read `AXSelectedText` and `AXBoundsForRange`
+3. Floating panel appears near the selection (without stealing focus) and auto-polishes via LLM
+4. User reviews the inline diff and clicks "Accept"
+5. Panel hides, replacement text is copied to clipboard, original app is activated, `Cmd+V` is simulated
 
 ### Settings storage
 Settings are persisted via `tauri-plugin-store` to a JSON file in the OS app data directory. The store uses `defaults` for initial values and `autoSave` for automatic persistence.
 
 ## Coding Conventions
 
+- **Clean up after trial-and-error**: When iterating on a solution (trying multiple approaches), you MUST audit and remove dead code from abandoned approaches before considering the task done. This includes: unused functions, unused structs/types, unused imports, unused dependencies (both `Cargo.toml` and `package.json`), unused files/components, and stale permissions in `capabilities/default.json`. Do NOT leave code prefixed with `_` to suppress warnings — remove it entirely. Run `cargo check` and `npx tsc --noEmit` to verify zero warnings.
 - **Shared logic** goes in `src/core/` -- must remain free of React/Tauri imports
 - **Components**: one component per file, file name matches export name, use named exports
 - **No default exports** anywhere in the codebase
@@ -114,6 +114,7 @@ Settings are persisted via `tauri-plugin-store` to a JSON file in the OS app dat
 - **Transitions**: 200ms duration for hover/focus states
 - **Dark mode**: follows system preference, applied via `.dark` class on `<html>`
 - **CSS variables**: design tokens defined in `globals.css` using oklch color space
+- **Transparent window**: body background is transparent; the card component provides the visible panel
 
 ## Development Commands
 
@@ -122,15 +123,13 @@ pnpm install          # Install all dependencies
 pnpm tauri dev        # Run the app in development mode (frontend + Rust)
 pnpm dev              # Run only the Vite frontend dev server
 pnpm build            # Build the frontend for production
-pnpm tauri build      # Build the full desktop app (DMG/MSI/AppImage)
+pnpm tauri build      # Build the full desktop app (DMG)
 ```
 
 ## Key Dependencies
 
 ### Frontend (npm)
-- `@tauri-apps/api` - Tauri JavaScript API
-- `@tauri-apps/plugin-global-shortcut` - Global hotkey registration
-- `@tauri-apps/plugin-clipboard-manager` - Clipboard read/write
+- `@tauri-apps/api` - Tauri JavaScript API (window, event, invoke)
 - `@tauri-apps/plugin-store` - Persistent settings storage
 - `diff-match-patch` - Text diff computation
 - `lucide-react` - SVG icons
@@ -138,13 +137,19 @@ pnpm tauri build      # Build the full desktop app (DMG/MSI/AppImage)
 ### Backend (Cargo)
 - `tauri` v2 with `tray-icon` feature
 - `tauri-plugin-global-shortcut` v2
-- `tauri-plugin-clipboard-manager` v2
 - `tauri-plugin-store` v2
-- `enigo` v0.3 - Cross-platform keyboard/mouse simulation
 - `serde` + `serde_json` - Serialization
+
+### macOS native (via FFI + CLI, no crate dependency)
+- `ApplicationServices.framework` - `AXUIElement*` functions for reading selected text
+- `CoreFoundation.framework` - `CFString*` functions for string conversion
+- `CoreGraphics.framework` - `CGEvent*` for mouse position fallback
+- `osascript` - AppleScript for app activation and `Cmd+V` simulation
+- `pbcopy` - Set clipboard content for replacement
 
 ## Future Plans
 
+- **Cross-platform**: Add Windows/Linux text access (UI Automation API, AT-SPI)
 - **Browser extension**: Extract `src/core/` into `packages/core`, build WXT-based extension
 - **More languages**: Add more polishing/translation modes
 - **Custom prompts**: Let users define their own system prompts
