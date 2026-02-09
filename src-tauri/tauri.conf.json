@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicehash/Tauri/dev/packages/tauri/schema.json",
+  "productName": "Polishr",
+  "version": "0.1.0",
+  "identifier": "com.polishr.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Polishr",
+        "width": 720,
+        "height": 540,
+        "minWidth": 600,
+        "minHeight": 440,
+        "decorations": false,
+        "transparent": false,
+        "center": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "trayIcon": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
