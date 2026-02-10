@@ -44,9 +44,7 @@ pub fn run() {
                                         let pos = tauri::LogicalPosition::new(panel_x, panel_y);
                                         let _ = window.set_position(tauri::Position::Logical(pos));
                                         let _ = window.show();
-                                        // NOTE: Do NOT call set_focus() here — keep the original app
-                                        // focused so it retains the text selection. The user can
-                                        // click on the panel when ready (which will naturally focus it).
+                                        let _ = window.set_focus();
                                     }
 
                                     let _ = handle.emit("selection-captured", result);
@@ -82,9 +80,18 @@ pub fn run() {
             commands::check_accessibility_permission,
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                tauri::WindowEvent::Focused(false) => {
+                    // Only hide — do NOT clear stored element here.
+                    // replace_text still needs the stored app name if Accept
+                    // was clicked (which hides the window before invoking replace).
+                    let _ = window.hide();
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())
