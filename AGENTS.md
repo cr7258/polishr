@@ -10,7 +10,7 @@ Polishr is a Grammarly-like desktop application for grammar polishing and transl
 - **Polish Chinese**: Fix Chinese grammar, remove redundancy, improve expression
 - **Translate CN to EN**: Translate Chinese to natural, polished English
 
-The app runs as a system tray utility with a floating panel UI. Users select text in **any** application, press a global hotkey (`Cmd+Option+P`), and a compact floating panel appears near the selection. The panel shows the polished result with inline diff. Clicking "Accept" replaces the text in-place by activating the original app and pasting from clipboard.
+The app runs as a system tray utility with a floating panel UI. Users select text in **any** application, press a global hotkey (`Cmd+Option+P`), and a compact floating panel appears near the selection. The panel shows a one-line explanation of changes, the polished result with Grammarly-style inline diff (strikethrough for deletions, underline for insertions), and action buttons (copy, retry, accept). A bottom tab bar allows switching between modes. Clicking "Accept" replaces the text in-place by activating the original app and pasting from clipboard.
 
 ## Tech Stack
 
@@ -48,16 +48,16 @@ polishr/
 │   │   │   └── stream.ts         # SSE parser for OpenAI-compatible APIs
 │   │   ├── prompts/
 │   │   │   ├── index.ts          # getPrompt(mode) selector
-│   │   │   ├── polish-en.ts      # English polishing system prompt
-│   │   │   ├── polish-zh.ts      # Chinese polishing system prompt
-│   │   │   └── translate.ts      # CN->EN translation system prompt
+│   │   │   ├── polish-en.ts      # English polishing prompt (returns explanation + text)
+│   │   │   ├── polish-zh.ts      # Chinese polishing prompt (returns explanation + text)
+│   │   │   └── translate.ts      # CN→EN translation prompt (returns explanation + text)
 │   │   └── diff/
 │   │       └── differ.ts         # computeDiff(), hasChanges()
 │   ├── components/
-│   │   ├── DiffView.tsx          # Inline diff with color-coded changes
+│   │   ├── DiffView.tsx          # Grammarly-style inline diff (strikethrough/underline)
 │   │   └── Settings.tsx          # API configuration modal
 │   ├── hooks/
-│   │   ├── usePolish.ts          # Streaming polish state management
+│   │   ├── usePolish.ts          # Streaming polish + explanation parsing
 │   │   └── useSettings.ts        # Settings persistence via tauri-plugin-store
 │   └── styles/
 │       └── globals.css           # TailwindCSS + design tokens (light/dark), transparent bg
@@ -84,7 +84,17 @@ polishr/
 **Capture**: The AX API reads `kAXSelectedTextAttribute` directly from the focused UI element — instant and doesn't touch the clipboard. **Replace**: We tried `AXUIElementSetAttributeValue` for writes, but many apps (browsers, Electron apps) silently ignore it while returning success. The universally reliable approach is: copy replacement text to clipboard, activate the original app via `osascript`, and simulate `Cmd+V`. Both capture and replace require macOS Accessibility permission.
 
 ### Why a floating panel instead of a full window?
-A small, transparent, always-on-top panel that appears near the selection mimics the Grammarly experience. The user stays in context — they can see their original text in the source app while reviewing the suggestion in the panel. The panel auto-polishes on capture and offers Accept/Dismiss.
+A small, transparent, always-on-top panel that appears near the selection mimics the Grammarly experience. The user stays in context — they can see their original text in the source app while reviewing the suggestion in the panel. The panel auto-polishes on capture and offers Accept/Dismiss/Copy/Retry.
+
+### UI layout (Grammarly-identical, blue theme)
+The floating panel mirrors Grammarly's layout exactly:
+1. **Top bar**: Settings icon + "Ask for a change" text input + blue send button. Allows custom re-polish instructions.
+2. **Suggestion card**: left 3px blue accent bar (`border-l-[3px] border-primary`), blue bold explanation text, inline diff (strikethrough + warm bg for deletions, subtle blue bg for insertions)
+3. **Action row** (inside accent bar area): pill-shaped outlined "Accept" button on the left, copy icon + settings dropdown on the right
+4. **Bottom mode tabs**: "Improve" / "中文" / "Translate" — text-only left-aligned tabs with active bottom-border indicator (no icons)
+
+### LLM response format (explanation + text)
+All prompts instruct the LLM to output a short explanation (first line, ≤8 words) followed by a blank line, then the polished text. `usePolish.ts` parses this at stream completion via `parseResponse()`. If no blank separator is found or the explanation is too long (>60 chars), the whole response is treated as polished text with no explanation.
 
 ### Why raw `fetch` instead of OpenAI SDK?
 The OpenAI SDK adds unnecessary weight and has Node.js-specific dependencies. Raw `fetch` + SSE parsing works in both Tauri WebView and browser extension contexts (for future extensibility). The client is ~60 lines of code.
@@ -96,7 +106,7 @@ The OpenAI SDK adds unnecessary weight and has Node.js-specific dependencies. Ra
 1. User selects text in any app and presses `Cmd+Option+P`
 2. Rust backend records the frontmost app name, then uses AX API to read `AXSelectedText` and `AXBoundsForRange`
 3. Floating panel appears near the selection (without stealing focus) and auto-polishes via LLM
-4. User reviews the inline diff and clicks "Accept"
+4. User reviews the inline diff (with explanation) and clicks "Accept", uses Copy, or types a custom instruction in "Ask for a change"
 5. Panel hides, replacement text is copied to clipboard, original app is activated, `Cmd+V` is simulated
 
 ### Settings storage

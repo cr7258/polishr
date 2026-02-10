@@ -7,7 +7,11 @@ A Grammarly-like desktop app for grammar polishing and translation. Select text 
 - Polish Chinese -- fix Chinese grammar, remove redundancy, improve expression
 - Translate CN to EN -- translate Chinese to natural, polished English
 - System-wide floating panel -- works in any app via global hotkey + macOS Accessibility API
-- Direct text replacement -- no clipboard manipulation, text is read/written via AX API
+- Grammarly-style inline diff -- strikethrough for deletions, underline for insertions
+- One-line explanation -- the LLM explains what it changed
+- In-place text replacement -- accept to replace via clipboard + paste
+- Copy to clipboard -- copy the polished result without replacing
+- Ask for a change -- type custom instructions to re-polish with specific guidance
 
 ## Architecture
 
@@ -30,8 +34,9 @@ sequenceDiagram
     LLM-->>Panel: SSE tokens
     Panel->>Panel: Display diff
     User->>Panel: Click Accept
-    Panel->>AX: Set AXSelectedText
-    AX-->>User: Text replaced in-place
+    Panel->>Panel: Hide & copy to clipboard
+    Panel->>AX: Activate original app
+    AX-->>User: Cmd+V pastes replacement
 ```
 
 ### Project Structure
@@ -88,7 +93,8 @@ flowchart TB
 | Build tool | Vite |
 | LLM | OpenAI-compatible API (raw fetch + SSE) |
 | Diff | diff-match-patch |
-| Text access | macOS Accessibility API (AXUIElement FFI) |
+| Text capture | macOS Accessibility API (AXUIElement FFI) |
+| Text replace | Clipboard + osascript Cmd+V |
 
 ## Local Development
 
@@ -152,7 +158,7 @@ Preset endpoints: **OpenAI**, **DeepSeek**, **Ollama** (local).
 
 ### macOS Accessibility Permission
 
-Polishr needs Accessibility access to read and write selected text in other apps via the AX API. On first use, grant permission in:
+Polishr needs Accessibility access to read selected text in other apps via the AX API. On first use, grant permission in:
 
 **System Settings > Privacy & Security > Accessibility > Enable Polishr**
 
@@ -169,8 +175,13 @@ Polishr needs Accessibility access to read and write selected text in other apps
 
 1. Select text in any app
 2. Press `Cmd+Option+P`
-3. A floating panel appears near your selection with the polished result
-4. Click **Accept** to replace the text in-place, or **Dismiss** to close
+3. A floating panel appears near your selection showing an explanation and the polished result with inline diff
+4. Review the suggestion, then:
+   - **Accept** — replaces the original text in-place
+   - **Copy** — copies the polished text to clipboard
+   - **Ask for a change** — type custom instructions (e.g. "make it more formal") and re-polish
+   - **Esc** — close the panel
+5. Switch modes via the bottom tab bar: **Improve** / **中文** / **Translate**
 
 ## License
 

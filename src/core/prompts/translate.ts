@@ -6,5 +6,13 @@ Rules:
 3. Preserve the original meaning, tone, and intent.
 4. Keep technical terms, proper nouns, and brand names accurate.
 5. Do NOT provide a literal word-by-word translation; aim for natural expression.
-6. Do NOT add explanations, notes, or the original Chinese text.
-7. Return ONLY the English translation, nothing else.`;
+
+Output format:
+- First line: a SHORT explanation (under 8 words) of the translation approach, e.g. "Translated to natural English" or "Adapted idiom for English readers"
+- Second line: empty
+- Third line onwards: the English translation only
+
+Example output:
+Translated with natural phrasing
+
+The translated sentence goes here.`;

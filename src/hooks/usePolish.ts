@@ -3,18 +3,50 @@ import type { PolishrConfig, PolishMode } from "@/core/llm/types";
 import { polishStream, PolishError } from "@/core/llm/client";
 import { computeDiff, type DiffSegment } from "@/core/diff/differ";
 
+/**
+ * Parse the LLM response into explanation + polished text.
+ *
+ * Expected format:
+ *   <explanation>\n\n<polished text>
+ *
+ * Falls back gracefully: if no blank-line separator is found the
+ * whole response is treated as the polished text with no explanation.
+ */
+function parseResponse(raw: string): { explanation: string; text: string } {
+  const idx = raw.indexOf("\n\n");
+  if (idx === -1) {
+    return { explanation: "", text: raw.trim() };
+  }
+  const explanation = raw.slice(0, idx).trim();
+  const text = raw.slice(idx + 2).trim();
+  // Guard: if the "explanation" is suspiciously long it probably isn't one
+  if (explanation.length > 60) {
+    return { explanation: "", text: raw.trim() };
+  }
+  return { explanation, text };
+}
+
 interface UsePolishReturn {
+  /** The clean polished text (explanation stripped) */
   result: string;
+  /** Short explanation of what was changed */
+  explanation: string;
   diffSegments: DiffSegment[];
   isStreaming: boolean;
   error: string | null;
-  startPolish: (text: string, mode: PolishMode, config: PolishrConfig) => void;
+  startPolish: (
+    text: string,
+    mode: PolishMode,
+    config: PolishrConfig,
+    customInstruction?: string,
+  ) => void;
   cancelPolish: () => void;
   reset: () => void;
 }
 
 export function usePolish(): UsePolishReturn {
   const [result, setResult] = useState("");
+  const [explanation, setExplanation] = useState("");
   const [diffSegments, setDiffSegments] = useState<DiffSegment[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,16 +61,23 @@ export function usePolish(): UsePolishReturn {
   const reset = useCallback(() => {
     cancelPolish();
     setResult("");
+    setExplanation("");
     setDiffSegments([]);
     setError(null);
   }, [cancelPolish]);
 
   const startPolish = useCallback(
-    async (text: string, mode: PolishMode, config: PolishrConfig) => {
+    async (
+      text: string,
+      mode: PolishMode,
+      config: PolishrConfig,
+      customInstruction?: string,
+    ) => {
       // Cancel any in-flight request
       cancelPolish();
 
       setResult("");
+      setExplanation("");
       setDiffSegments([]);
       setError(null);
       setIsStreaming(true);
@@ -54,13 +93,23 @@ export function usePolish(): UsePolishReturn {
           mode,
           config,
           controller.signal,
+          customInstruction,
         )) {
           accumulated += token;
+
+          // While streaming, show everything (raw) — the explanation will be
+          // separated once the stream completes.
           setResult(accumulated);
         }
 
-        // Compute diff once streaming is complete
-        const segments = computeDiff(text, accumulated);
+        // Parse the complete response
+        const { explanation: exp, text: polished } =
+          parseResponse(accumulated);
+        setExplanation(exp);
+        setResult(polished);
+
+        // Compute diff on the clean polished text
+        const segments = computeDiff(text, polished);
         setDiffSegments(segments);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
@@ -84,6 +133,7 @@ export function usePolish(): UsePolishReturn {
 
   return {
     result,
+    explanation,
     diffSegments,
     isStreaming,
     error,

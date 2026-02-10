@@ -10,7 +10,7 @@ export function DiffView({ segments }: DiffViewProps) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-3 py-3 text-sm leading-relaxed">
+    <div className="text-[13.5px] leading-relaxed text-foreground">
       {segments.map((segment, i) => {
         if (segment.type === "equal") {
           return <span key={i}>{segment.text}</span>;
@@ -19,7 +19,7 @@ export function DiffView({ segments }: DiffViewProps) {
           return (
             <span
               key={i}
-              className="rounded-sm bg-diff-delete-bg text-diff-delete-text line-through decoration-diff-delete-text/50"
+              className="rounded-sm bg-diff-delete-bg text-diff-delete-text line-through"
             >
               {segment.text}
             </span>

@@ -3,31 +3,31 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Indigo-based palette from Micro SaaS color recommendation */
+  /* Blue-based palette — Grammarly-inspired clean design */
   --background: oklch(0.985 0.002 260);
-  --foreground: oklch(0.15 0.03 270);
+  --foreground: oklch(0.145 0.03 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0.03 270);
+  --card-foreground: oklch(0.145 0.03 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0.03 270);
-  --primary: oklch(0.55 0.2 265);
+  --popover-foreground: oklch(0.145 0.03 260);
+  --primary: oklch(0.52 0.18 260);
   --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.96 0.01 260);
-  --secondary-foreground: oklch(0.25 0.03 270);
+  --secondary: oklch(0.96 0.008 260);
+  --secondary-foreground: oklch(0.25 0.03 260);
   --muted: oklch(0.96 0.005 260);
-  --muted-foreground: oklch(0.5 0.02 260);
+  --muted-foreground: oklch(0.55 0.015 260);
   --accent: oklch(0.96 0.01 260);
-  --accent-foreground: oklch(0.25 0.03 270);
+  --accent-foreground: oklch(0.25 0.03 260);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.577 0.245 27.325);
   --success: oklch(0.65 0.17 162);
   --success-foreground: oklch(0.98 0 0);
-  --border: oklch(0.91 0.01 260);
-  --input: oklch(0.91 0.01 260);
-  --ring: oklch(0.55 0.2 265);
+  --border: oklch(0.915 0.008 260);
+  --input: oklch(0.915 0.008 260);
+  --ring: oklch(0.52 0.18 260);
   --radius: 0.5rem;
 
-  /* Diff colors */
+  /* Diff colors — green inserts, red deletes */
   --diff-insert-bg: oklch(0.95 0.04 155);
   --diff-insert-text: oklch(0.35 0.1 155);
   --diff-delete-bg: oklch(0.95 0.04 25);
@@ -41,7 +41,7 @@
   --card-foreground: oklch(0.95 0.005 260);
   --popover: oklch(0.17 0.015 260);
   --popover-foreground: oklch(0.95 0.005 260);
-  --primary: oklch(0.65 0.2 265);
+  --primary: oklch(0.62 0.18 260);
   --primary-foreground: oklch(0.13 0.01 260);
   --secondary: oklch(0.22 0.015 260);
   --secondary-foreground: oklch(0.95 0.005 260);
@@ -55,7 +55,7 @@
   --success-foreground: oklch(0.13 0.01 260);
   --border: oklch(0.25 0.015 260);
   --input: oklch(0.25 0.015 260);
-  --ring: oklch(0.65 0.2 265);
+  --ring: oklch(0.62 0.18 260);
 
   --diff-insert-bg: oklch(0.22 0.04 155);
   --diff-insert-text: oklch(0.82 0.08 155);

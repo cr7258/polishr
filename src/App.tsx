@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -9,16 +9,14 @@ import { Settings } from "@/components/Settings";
 import { usePolish } from "@/hooks/usePolish";
 import { useSettings } from "@/hooks/useSettings";
 import {
-  Sparkles,
-  Check,
-  X,
   Settings2,
   Loader2,
   AlertCircle,
-  PenLine,
-  Languages,
-  ArrowRightLeft,
   ShieldAlert,
+  Copy,
+  CheckCheck,
+  SendHorizonal,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -36,10 +34,14 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accessibilityError, setAccessibilityError] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [changeInput, setChangeInput] = useState("");
+  const changeInputRef = useRef<HTMLInputElement>(null);
 
   const { config, saveConfig, isConfigured } = useSettings();
   const {
     result,
+    explanation,
     diffSegments,
     isStreaming,
     error,
@@ -53,8 +55,9 @@ export function App() {
     (text: string) => {
       setInputText(text);
       setAccessibilityError(false);
+      setCopied(false);
+      setChangeInput("");
       reset();
-      // Auto-start polishing if configured
       if (isConfigured && text.trim()) {
         startPolish(text, mode, config);
       }
@@ -109,20 +112,16 @@ export function App() {
     if (!result || isReplacing) return;
     setIsReplacing(true);
     try {
-      // Hide the panel FIRST — the replace command will activate the
-      // original app and paste, so our panel must not be in the way
       const win = getCurrentWindow();
       await win.hide();
-      // Small delay to ensure the panel is fully hidden
       await new Promise((r) => setTimeout(r, 50));
-      // Replace text via clipboard + paste in the original app
       await invoke("replace_text", { text: result });
       console.log("[Polishr] replace_text succeeded");
       reset();
       setInputText("");
+      setChangeInput("");
     } catch (err) {
       console.error("Failed to replace:", err);
-      // Show the panel again if replace failed
       const win = getCurrentWindow();
       await win.show();
     } finally {
@@ -131,101 +130,96 @@ export function App() {
   }, [result, reset, isReplacing]);
 
   const handleDismiss = useCallback(async () => {
-    // Clear the stored element reference
     await invoke("dismiss");
     const win = getCurrentWindow();
     await win.hide();
     reset();
     setInputText("");
+    setCopied(false);
+    setChangeInput("");
   }, [reset]);
 
-  const handleRetry = useCallback(() => {
-    if (inputText.trim() && isConfigured) {
-      startPolish(inputText, mode, config);
+  const handleRetry = useCallback(
+    (customInstruction?: string) => {
+      if (inputText.trim() && isConfigured) {
+        setCopied(false);
+        startPolish(inputText, mode, config, customInstruction);
+      }
+    },
+    [inputText, mode, config, isConfigured, startPolish],
+  );
+
+  const handleCopy = useCallback(async () => {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      console.error("Failed to copy");
     }
-  }, [inputText, mode, config, isConfigured, startPolish]);
+  }, [result]);
+
+  const handleSendChange = useCallback(() => {
+    const instruction = changeInput.trim();
+    if (!instruction || !inputText.trim()) return;
+    handleRetry(instruction);
+    setChangeInput("");
+  }, [changeInput, inputText, handleRetry]);
 
   const showDiff = diffSegments.length > 0 && !isStreaming;
   const showStreamingResult = isStreaming && result.length > 0;
-  const hasResult = result.length > 0 && !isStreaming;
 
-  const modeIcons: Record<PolishMode, typeof PenLine> = {
-    "polish-en": PenLine,
-    "polish-zh": Languages,
-    translate: ArrowRightLeft,
-  };
   const modeLabels: Record<PolishMode, string> = {
-    "polish-en": "EN",
-    "polish-zh": "中",
-    translate: "译",
+    "polish-en": "Improve",
+    "polish-zh": "中文",
+    translate: "Translate",
   };
   const modes: PolishMode[] = ["polish-en", "polish-zh", "translate"];
 
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
-      {/* Header bar */}
+      {/* ─── Top bar: "Ask for a change" input ─── */}
       <div
         data-tauri-drag-region
-        className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2"
+        className="flex shrink-0 items-center gap-2.5 border-b border-border px-3 py-2"
       >
-        <Sparkles className="h-3.5 w-3.5 text-primary" />
-        <span className="text-xs font-semibold text-foreground">Polishr</span>
-
-        <div className="flex-1" />
-
-        {/* Compact mode switcher */}
-        <div className="flex gap-0.5 rounded-md bg-secondary p-0.5">
-          {modes.map((m) => {
-            const Icon = modeIcons[m];
-            return (
-              <button
-                key={m}
-                onClick={() => {
-                  setMode(m);
-                  if (inputText.trim() && isConfigured && !isStreaming) {
-                    reset();
-                    startPolish(inputText, m, config);
-                  }
-                }}
-                disabled={isStreaming}
-                title={m}
-                className={cn(
-                  "flex cursor-pointer items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-medium transition-all duration-200",
-                  mode === m
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                  isStreaming && "pointer-events-none opacity-50",
-                )}
-              >
-                <Icon className="h-3 w-3" />
-                {modeLabels[m]}
-              </button>
-            );
-          })}
-        </div>
-
         <button
           onClick={() => setSettingsOpen(true)}
-          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
+          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
           title="Settings"
         >
-          <Settings2 className="h-3.5 w-3.5" />
+          <Settings2 className="h-4 w-4" />
         </button>
 
+        <input
+          ref={changeInputRef}
+          type="text"
+          value={changeInput}
+          onChange={(e) => setChangeInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSendChange();
+          }}
+          placeholder="Ask for a change"
+          disabled={!inputText || isStreaming}
+          className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+        />
+
         <button
-          onClick={handleDismiss}
-          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
-          title="Dismiss (Esc)"
+          onClick={handleSendChange}
+          disabled={!changeInput.trim() || !inputText || isStreaming}
+          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-30"
+          title="Send"
         >
-          <X className="h-3.5 w-3.5" />
+          <SendHorizonal className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      {/* Accessibility error */}
+      {/* ─── Accessibility error ─── */}
       {accessibilityError && (
-        <div className="flex items-center gap-2 border-b border-border bg-destructive/5 px-3 py-2">
-          <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-destructive" />
-          <p className="text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2 bg-destructive/5 px-4 py-2.5">
+          <ShieldAlert className="h-4 w-4 shrink-0 text-destructive" />
+          <p className="text-xs text-muted-foreground">
             Enable Accessibility:{" "}
             <span className="font-medium text-foreground">
               System Settings &rarr; Privacy &rarr; Accessibility
@@ -234,55 +228,106 @@ export function App() {
         </div>
       )}
 
-      {/* Not configured */}
+      {/* ─── Not configured ─── */}
       {!isConfigured && !accessibilityError && (
-        <div className="flex items-center gap-2 px-3 py-3">
-          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <p className="text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2 px-4 py-3">
+          <AlertCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <p className="text-xs text-muted-foreground">
             Configure your API key to get started.
           </p>
           <button
             onClick={() => setSettingsOpen(true)}
-            className="ml-auto cursor-pointer rounded-md bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground transition-colors duration-200 hover:bg-primary/90"
+            className="ml-auto cursor-pointer rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90"
           >
             Settings
           </button>
         </div>
       )}
 
-      {/* Content area */}
+      {/* ─── Content area ─── */}
       {isConfigured && !accessibilityError && (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {/* Loading state */}
+          {/* Loading spinner */}
           {isStreaming && !showStreamingResult && (
-            <div className="flex items-center gap-2 px-3 py-4">
+            <div className="flex items-center gap-2 px-4 py-5">
               <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              <span className="text-xs text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 Polishing...
               </span>
             </div>
           )}
 
-          {/* Streaming result */}
+          {/* Streaming raw result */}
           {showStreamingResult && !showDiff && (
-            <div className="px-3 py-3 text-sm leading-relaxed text-foreground">
-              {result}
-              <span className="inline-block h-4 w-0.5 animate-pulse bg-primary" />
+            <div className="border-l-[3px] border-primary mx-3 my-3 px-4 py-1">
+              <p className="text-[13.5px] leading-relaxed text-foreground">
+                {result}
+                <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-primary align-text-bottom" />
+              </p>
             </div>
           )}
 
-          {/* Diff view */}
-          {showDiff && <DiffView segments={diffSegments} />}
+          {/* Suggestion card: accent bar + explanation + diff + actions */}
+          {showDiff && (
+            <div className="border-l-[3px] border-primary mx-3 my-3 px-4 py-1">
+              {/* Explanation */}
+              {explanation && (
+                <p className="mb-2 text-[13.5px] font-semibold leading-snug text-primary">
+                  {explanation}
+                </p>
+              )}
+
+              {/* Diff */}
+              <DiffView segments={diffSegments} />
+
+              {/* Action row */}
+              <div className="mt-3 flex items-center">
+                {/* Accept — outlined pill */}
+                <button
+                  onClick={handleAccept}
+                  disabled={isReplacing}
+                  className="cursor-pointer rounded-full border border-border px-3.5 py-1 text-xs font-medium text-foreground transition-colors duration-150 hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {isReplacing ? "Replacing..." : "Accept"}
+                </button>
+
+                <div className="flex-1" />
+
+                {/* Copy */}
+                <button
+                  onClick={handleCopy}
+                  className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:text-foreground"
+                  title="Copy to clipboard"
+                >
+                  {copied ? (
+                    <CheckCheck className="h-4 w-4 text-primary" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </button>
+
+                {/* Settings dropdown */}
+                <button
+                  onClick={() => setSettingsOpen(true)}
+                  className="flex cursor-pointer items-center gap-0.5 rounded-md px-1 py-1 text-muted-foreground transition-colors duration-150 hover:text-foreground"
+                  title="Settings"
+                >
+                  <Settings2 className="h-4 w-4" />
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Error state */}
           {error && (
-            <div className="flex items-start gap-2 px-3 py-3">
-              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+            <div className="flex items-start gap-2 px-4 py-3">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
               <div className="flex-1">
                 <p className="text-xs text-destructive">{error}</p>
                 <button
-                  onClick={handleRetry}
-                  className="mt-1 cursor-pointer text-[11px] font-medium text-primary hover:underline"
+                  onClick={() => handleRetry()}
+                  className="mt-1 cursor-pointer text-xs font-medium text-primary hover:underline"
                 >
                   Retry
                 </button>
@@ -290,71 +335,65 @@ export function App() {
             </div>
           )}
 
-          {/* Empty / waiting state */}
-          {!result && !error && !isStreaming && inputText && (
-            <div className="flex items-center justify-center px-3 py-4">
+          {/* Waiting state — no text captured yet */}
+          {!result && !error && !isStreaming && !inputText && (
+            <div className="flex items-center justify-center px-4 py-5">
               <p className="text-xs text-muted-foreground">
-                Ready to polish. Press the button below.
+                Select text and press Cmd+Option+P
               </p>
             </div>
           )}
         </div>
       )}
 
-      {/* Action bar */}
-      {isConfigured && !accessibilityError && (
-        <div className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-2">
-          {/* Original text preview */}
-          {inputText && (
-            <span className="max-w-[180px] truncate text-[11px] text-muted-foreground">
-              {inputText}
-            </span>
-          )}
-
+      {/* ─── Streaming stop bar ─── */}
+      {isStreaming && (
+        <div className="flex shrink-0 items-center border-t border-border px-4 py-1.5">
           <div className="flex-1" />
-
-          {isStreaming && (
-            <button
-              onClick={cancelPolish}
-              className="flex cursor-pointer items-center gap-1 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-[11px] font-medium text-destructive transition-colors duration-200 hover:bg-destructive/20"
-            >
-              Stop
-            </button>
-          )}
-
-          {!isStreaming && !hasResult && inputText && (
-            <button
-              onClick={handleRetry}
-              className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground transition-colors duration-200 hover:bg-primary/90"
-            >
-              <Sparkles className="h-3 w-3" />
-              Polish
-            </button>
-          )}
-
-          {hasResult && (
-            <>
-              <button
-                onClick={handleDismiss}
-                className="flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors duration-200 hover:bg-accent"
-              >
-                <X className="h-3 w-3" />
-                Dismiss
-              </button>
-              <button
-                onClick={handleAccept}
-                disabled={isReplacing}
-                className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground transition-colors duration-200 hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-              >
-                <Check className="h-3 w-3" />
-                {isReplacing ? "Replacing..." : "Accept"}
-              </button>
-            </>
-          )}
+          <button
+            onClick={cancelPolish}
+            className="cursor-pointer rounded-full border border-destructive/30 px-3 py-1 text-xs font-medium text-destructive transition-colors duration-150 hover:bg-destructive/5"
+          >
+            Stop
+          </button>
         </div>
       )}
 
-      {/* Settings modal */}
+      {/* ─── Bottom mode tabs (also draggable) ─── */}
+      <div
+        data-tauri-drag-region
+        className="flex shrink-0 items-center gap-5 border-t border-border px-4"
+      >
+        {modes.map((m) => {
+          const isActive = mode === m;
+          return (
+            <button
+              key={m}
+              onClick={() => {
+                setMode(m);
+                setCopied(false);
+                setChangeInput("");
+                if (inputText.trim() && isConfigured && !isStreaming) {
+                  reset();
+                  startPolish(inputText, m, config);
+                }
+              }}
+              disabled={isStreaming}
+              className={cn(
+                "cursor-pointer border-b-2 py-2.5 text-[13px] transition-colors duration-150",
+                isActive
+                  ? "border-primary font-semibold text-primary"
+                  : "border-transparent font-normal text-muted-foreground hover:text-foreground",
+                isStreaming && "pointer-events-none opacity-50",
+              )}
+            >
+              {modeLabels[m]}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ─── Settings modal ─── */}
       <Settings
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

@@ -15,18 +15,26 @@ export class PolishError extends Error {
 /**
  * Stream a polishing/translation request to an OpenAI-compatible API.
  * Yields content tokens as they arrive.
+ *
+ * @param customInstruction - Optional free-form instruction from the user
+ *   (e.g. "make it more formal"). Appended to the user message.
  */
 export async function* polishStream(
   text: string,
   mode: PolishMode,
   config: PolishrConfig,
   signal?: AbortSignal,
+  customInstruction?: string,
 ): AsyncGenerator<string> {
   const systemPrompt = getPrompt(mode);
 
+  const userContent = customInstruction
+    ? `${text}\n\n[Additional instruction from user: ${customInstruction}]`
+    : text;
+
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: text },
+    { role: "user", content: userContent },
   ];
 
   const response = await fetch(
@@ -78,9 +86,16 @@ export async function polish(
   mode: PolishMode,
   config: PolishrConfig,
   signal?: AbortSignal,
+  customInstruction?: string,
 ): Promise<string> {
   let result = "";
-  for await (const token of polishStream(text, mode, config, signal)) {
+  for await (const token of polishStream(
+    text,
+    mode,
+    config,
+    signal,
+    customInstruction,
+  )) {
     result += token;
   }
   return result;

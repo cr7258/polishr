@@ -28,12 +28,18 @@ pub fn run() {
                                         result.y
                                     );
 
-                                    // Position the floating panel near the selection
+                                    // Position the floating panel ABOVE the selection
                                     if let Some(window) = handle.get_webview_window("main") {
-                                        // Place the panel below the selection
+                                        let panel_height = 300.0_f64; // matches tauri.conf.json
                                         let panel_x = result.x;
-                                        // On macOS, AX API gives coordinates from top-left of screen
-                                        let panel_y = result.y + result.height + 8.0;
+                                        // Place above: selection top - panel height - gap
+                                        let panel_y = result.y - panel_height - 8.0;
+                                        // If that would go off the top of the screen, place below instead
+                                        let panel_y = if panel_y < 0.0 {
+                                            result.y + result.height + 8.0
+                                        } else {
+                                            panel_y
+                                        };
 
                                         let pos = tauri::LogicalPosition::new(panel_x, panel_y);
                                         let _ = window.set_position(tauri::Position::Logical(pos));
