@@ -39,22 +39,11 @@ export function DesktopApp() {
         <div data-tauri-drag-region className="px-5 pt-5 pb-1">
           <div data-tauri-drag-region className="mb-5 h-3" />
           <div className="flex items-center gap-3">
-            <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-400 to-blue-600 shadow-lg shadow-blue-500/25">
-              <svg
-                className="h-[18px] w-[18px] text-white"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth="2.2"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59"
-                />
-              </svg>
-              <div className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#2c3e6b] bg-emerald-400" />
-            </div>
+            <img
+              src="/polishr.png"
+              alt="Polishr"
+              className="h-9 w-9 rounded-lg shadow-lg shadow-blue-500/25"
+            />
             <div>
               <div className="text-[14px] font-semibold tracking-[-0.01em] text-white">
                 Polishr
