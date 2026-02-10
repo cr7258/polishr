@@ -1,17 +1,19 @@
 # Polishr
 
-A Grammarly-like desktop app for grammar polishing and translation. Select text in any app, press a hotkey, and a compact floating panel appears with polished results — accept to replace in-place.
+A Grammarly-like desktop app for grammar polishing, rephrasing, and translation. Select text in any app, press a hotkey, and a compact floating panel appears with polished results — accept to replace in-place.
 
 **Features:**
-- Polish English -- fix grammar, spelling, punctuation, improve clarity
-- Polish Chinese -- fix Chinese grammar, remove redundancy, improve expression
-- Translate CN to EN -- translate Chinese to natural, polished English
+- Improve -- fix grammar, spelling, punctuation (auto-detects language)
+- Rephrase -- rewrite with different words and structure (auto-detects language)
+- Translate -- Chinese to English or English to Chinese (auto-detects direction)
 - System-wide floating panel -- works in any app via global hotkey + macOS Accessibility API
-- Grammarly-style inline diff -- strikethrough for deletions, underline for insertions
+- Inline diff -- green/red highlighting for insertions and deletions
 - One-line explanation -- the LLM explains what it changed
 - In-place text replacement -- accept to replace via clipboard + paste
-- Copy to clipboard -- copy the polished result without replacing
 - Ask for a change -- type custom instructions to re-polish with specific guidance
+- Desktop settings -- configure multiple API providers (OpenAI, DeepSeek, OpenRouter, MiniMax)
+- History -- all polishing sessions saved and searchable
+- Auto-dismiss -- panel closes when you click away
 
 ## Architecture
 
@@ -29,7 +31,7 @@ sequenceDiagram
     AX->>AX: Read AXSelectedText
     AX->>AX: Read AXBoundsForRange
     AX-->>Panel: text + screen position
-    Panel->>Panel: Show near selection
+    Panel->>Panel: Show above selection
     Panel->>LLM: Stream polish request
     LLM-->>Panel: SSE tokens
     Panel->>Panel: Display diff
@@ -39,48 +41,39 @@ sequenceDiagram
     AX-->>User: Cmd+V pastes replacement
 ```
 
-### Project Structure
+### Multi-Window Architecture
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#e3f2fd', 'primaryTextColor': '#0d47a1', 'primaryBorderColor': '#64b5f6', 'lineColor': '#42a5f5', 'secondaryColor': '#fce4ec', 'tertiaryColor': '#f3e5f5'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#e3f2fd', 'primaryTextColor': '#0d47a1', 'primaryBorderColor': '#64b5f6', 'lineColor': '#42a5f5'}}}%%
 flowchart TB
-    subgraph frontend ["src/ — React Frontend"]
-        App["App.tsx — Floating panel UI"]:::reactNode
-        hooks["hooks/ — usePolish, useSettings"]:::hookNode
+    subgraph tauri [Single Tauri Process]
+        rust[Rust Backend]
+        store[tauri-plugin-store]
     end
 
-    subgraph core ["core/ — Pure TS, zero React deps"]
-        llm["llm/ — Streaming client"]:::coreNode
-        prompts["prompts/ — EN, ZH, Translate"]:::coreNode
-        diff["diff/ — diff-match-patch"]:::coreNode
+    subgraph windows [Two Windows]
+        panel["main — Floating Panel"]
+        desktop["settings — Desktop App"]
     end
 
-    subgraph backend ["src-tauri/ — Rust Backend"]
-        ax["ax_text.rs — macOS AX API FFI"]:::rustNode
-        commands["commands.rs — capture & replace"]:::rustNode
-        tray["tray.rs — System tray"]:::rustNode
-        lib["lib.rs — Plugin init + hotkey"]:::rustNode
+    subgraph react [React Frontend]
+        routing["main.tsx — route by window label"]
+        panelUI["App.tsx"]
+        desktopUI["DesktopApp.tsx"]
     end
 
-    AX_API["macOS Accessibility API"]:::osNode
-
-    App e1@--> hooks
-    hooks e2@--> core
-    hooks e3@-->|"invoke()"| commands
-    commands e4@--> ax
-    ax e5@-->|"FFI"| AX_API
+    panel e1@--> routing
+    desktop e2@--> routing
+    routing --> panelUI
+    routing --> desktopUI
+    panelUI e3@-->|"invoke()"| rust
+    desktopUI e4@-->|store read/write| store
+    rust --> store
 
     e1@{ animate: true }
     e2@{ animate: true }
     e3@{ animate: true, animation: slow }
     e4@{ animate: true, animation: slow }
-    e5@{ animate: true, animation: slow }
-
-    classDef reactNode fill:#e3f2fd,stroke:#64b5f6,stroke-width:2px,color:#0d47a1
-    classDef hookNode fill:#fff3e0,stroke:#ffb74d,stroke-width:2px,color:#e65100
-    classDef coreNode fill:#e8f5e9,stroke:#66bb6a,stroke-width:2px,color:#1b5e20
-    classDef rustNode fill:#fce4ec,stroke:#f06292,stroke-width:2px,color:#880e4f
-    classDef osNode fill:#f3e5f5,stroke:#ce93d8,stroke-width:2px,color:#4a148c
 ```
 
 ### Tech Stack
@@ -93,6 +86,7 @@ flowchart TB
 | Build tool | Vite |
 | LLM | OpenAI-compatible API (raw fetch + SSE) |
 | Diff | diff-match-patch |
+| Language detection | Unicode CJK ratio |
 | Text capture | macOS Accessibility API (AXUIElement FFI) |
 | Text replace | Clipboard + osascript Cmd+V |
 
@@ -145,16 +139,18 @@ Output:
 
 ### Configuration
 
-On first launch, open Settings (gear icon in the floating panel) and configure:
+Click the **Polishr tray icon** (menu bar) > **Settings** to open the Desktop settings window.
 
-| Setting | Description | Example |
-|---------|-------------|---------|
-| API Endpoint | OpenAI-compatible base URL | `https://api.openai.com/v1` |
-| API Key | Your API key | `sk-...` |
-| Model | Model name | `gpt-4o`, `deepseek-chat` |
-| Temperature | Output creativity (0-1) | `0.3` (recommended) |
+**API Providers** — Configure one or more LLM providers:
 
-Preset endpoints: **OpenAI**, **DeepSeek**, **Ollama** (local).
+| Provider | Default Endpoint | Default Model |
+|----------|-----------------|---------------|
+| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
+| OpenRouter | `https://openrouter.ai/api/v1` | `openai/gpt-4o` |
+| MiniMax | `https://api.minimax.chat/v1` | `abab6.5s-chat` |
+
+**Preferences** — Set default action (Improve/Rephrase/Translate).
 
 ### macOS Accessibility Permission
 
@@ -173,15 +169,22 @@ Polishr needs Accessibility access to read selected text in other apps via the A
 
 ## Usage
 
+### Floating Panel (Quick Polish)
 1. Select text in any app
 2. Press `Cmd+Option+P`
-3. A floating panel appears near your selection showing an explanation and the polished result with inline diff
+3. A floating panel appears above your selection with the polished result and inline diff
 4. Review the suggestion, then:
    - **Accept** — replaces the original text in-place
    - **Copy** — copies the polished text to clipboard
-   - **Ask for a change** — type custom instructions (e.g. "make it more formal") and re-polish
-   - **Esc** — close the panel
-5. Switch modes via the bottom tab bar: **Improve** / **中文** / **Translate**
+   - **Ask for a change** — type custom instructions and re-polish
+   - Click away or press **Esc** — auto-dismiss
+5. Switch modes via the bottom tab bar: **Improve** / **Rephrase** / **Translate**
+
+### Desktop Settings
+- Click the **tray icon** > **Settings** to open
+- **Providers** — Add API keys, switch between providers
+- **History** — Browse and search past polishing sessions
+- **Preferences** — Set default action for the hotkey
 
 ## License
 

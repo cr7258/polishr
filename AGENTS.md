@@ -6,11 +6,14 @@
 
 Polishr is a Grammarly-like desktop application for grammar polishing and translation. It supports:
 
-- **Polish English**: Fix grammar, spelling, punctuation, improve clarity
-- **Polish Chinese**: Fix Chinese grammar, remove redundancy, improve expression
-- **Translate CN to EN**: Translate Chinese to natural, polished English
+- **Improve**: Fix grammar, spelling, punctuation, improve clarity (auto-detects language)
+- **Rephrase**: Rewrite with different words/structure (auto-detects language)
+- **Translate**: Translate between Chinese and English (auto-detects source, translates to opposite)
 
-The app runs as a system tray utility with a floating panel UI. Users select text in **any** application, press a global hotkey (`Cmd+Option+P`), and a compact floating panel appears near the selection. The panel shows a one-line explanation of changes, the polished result with Grammarly-style inline diff (strikethrough for deletions, underline for insertions), and action buttons (copy, retry, accept). A bottom tab bar allows switching between modes. Clicking "Accept" replaces the text in-place by activating the original app and pasting from clipboard.
+The app has **two windows** in a single Tauri process:
+
+1. **Floating Panel** (`main` window) — compact, transparent, always-on-top panel near the selection. Shows explanation + diff + accept/copy actions. Appears on `Cmd+Option+P`. Auto-dismisses on focus loss.
+2. **Desktop Settings** (`settings` window) — full settings window with sidebar navigation. Configures API providers, views history, sets preferences. Opens from tray menu.
 
 ## Tech Stack
 
@@ -18,10 +21,12 @@ The app runs as a system tray utility with a floating panel UI. Users select tex
 |-------|-----------|
 | Desktop framework | Tauri v2 (Rust backend + WebView frontend) |
 | Frontend | React 19 + TypeScript |
+| Routing | Window label detection (`main` vs `settings`) |
 | Styling | TailwindCSS 4 + custom design tokens (shadcn/ui pattern) |
 | Build tool | Vite |
 | LLM integration | OpenAI-compatible API via raw `fetch` + SSE streaming |
 | Diff engine | diff-match-patch |
+| Language detection | Unicode CJK ratio (`src/core/lang/detect.ts`) |
 | Text capture | macOS Accessibility API (`AXUIElement` FFI) — reads selected text |
 | Text replace | Clipboard + `osascript` Cmd+V — universally reliable |
 | Tauri plugins | `global-shortcut`, `store` |
@@ -36,43 +41,50 @@ polishr/
 ├── index.html
 ├── AGENTS.md                     # This file - agent knowledge base
 ├── src/                          # React frontend
-│   ├── main.tsx                  # React entry point
+│   ├── main.tsx                  # Entry: routes by window label (main→App, settings→DesktopApp)
 │   ├── App.tsx                   # Floating panel root component
 │   ├── vite-env.d.ts
 │   ├── lib/
 │   │   └── utils.ts              # cn() utility for class merging
 │   ├── core/                     # Pure TypeScript logic (NO React/Tauri deps)
 │   │   ├── llm/
-│   │   │   ├── types.ts          # PolishrConfig, PolishMode, ChatMessage
-│   │   │   ├── client.ts         # polishStream() async generator
+│   │   │   ├── types.ts          # PolishrConfig, PolishMode, Provider, HistoryRecord, PROVIDER_PRESETS
+│   │   │   ├── client.ts         # polishStream() async generator (accepts lang param)
 │   │   │   └── stream.ts         # SSE parser for OpenAI-compatible APIs
 │   │   ├── prompts/
-│   │   │   ├── index.ts          # getPrompt(mode) selector
-│   │   │   ├── polish-en.ts      # English polishing prompt (returns explanation + text)
-│   │   │   ├── polish-zh.ts      # Chinese polishing prompt (returns explanation + text)
-│   │   │   └── translate.ts      # CN→EN translation prompt (returns explanation + text)
+│   │   │   ├── index.ts          # getPrompt(mode, lang) — routes by mode + detected language
+│   │   │   ├── improve.ts        # Universal improve prompt (same-language polish)
+│   │   │   ├── rephrase.ts       # Universal rephrase prompt (same-language rewrite)
+│   │   │   └── translate.ts      # Dynamic translate prompt (getTranslatePrompt(sourceLang))
+│   │   ├── lang/
+│   │   │   └── detect.ts         # detectLanguage() — CJK ratio auto-detection
 │   │   └── diff/
 │   │       └── differ.ts         # computeDiff(), hasChanges()
+│   ├── pages/                    # Desktop settings pages
+│   │   ├── DesktopApp.tsx        # Desktop layout: sidebar + content area
+│   │   ├── ProvidersPage.tsx     # API provider cards + config form
+│   │   ├── HistoryPage.tsx       # History list with search + copy
+│   │   └── PreferencesPage.tsx   # Default action, hotkey display
 │   ├── components/
-│   │   ├── DiffView.tsx          # Grammarly-style inline diff (strikethrough/underline)
-│   │   └── Settings.tsx          # API configuration modal
+│   │   └── DiffView.tsx          # Inline diff (green/red bg + strikethrough)
 │   ├── hooks/
-│   │   ├── usePolish.ts          # Streaming polish + explanation parsing
-│   │   └── useSettings.ts        # Settings persistence via tauri-plugin-store
+│   │   ├── usePolish.ts          # Streaming polish + explanation parsing + onComplete callback
+│   │   ├── useSettings.ts        # Provider management, active provider, default mode
+│   │   └── useHistory.ts         # History CRUD via tauri-plugin-store
 │   └── styles/
 │       └── globals.css           # TailwindCSS + design tokens (light/dark), transparent bg
 ├── src-tauri/                    # Rust backend
 │   ├── Cargo.toml
 │   ├── build.rs
-│   ├── tauri.conf.json           # Floating panel window config (transparent, always-on-top)
+│   ├── tauri.conf.json           # Two windows: main (floating) + settings (desktop)
 │   ├── capabilities/
-│   │   └── default.json          # Plugin permissions
+│   │   └── default.json          # Plugin permissions for both windows
 │   └── src/
 │       ├── main.rs               # Entry point
-│       ├── lib.rs                # Tauri app setup, hotkey handler, window positioning
+│       ├── lib.rs                # Tauri app setup, hotkey handler, window positioning, blur-dismiss
 │       ├── ax_text.rs            # macOS AX API FFI (read selected text, get bounds) + clipboard/paste helpers
 │       ├── commands.rs           # capture_and_locate, replace_text, dismiss, check_accessibility_permission
-│       └── tray.rs               # System tray icon and menu
+│       └── tray.rs               # System tray: "Settings" opens desktop window, "Quit" exits
 └── .cursor/
     └── rules/
         └── agents-md-update.mdc  # Rule enforcing AGENTS.md updates
@@ -80,42 +92,55 @@ polishr/
 
 ## Architecture Decisions
 
+### Multi-window architecture
+Both the floating panel and desktop settings share a single Tauri process. `main.tsx` checks `getCurrentWindow().label` to decide which React tree to render. Data is shared via `tauri-plugin-store` (two store files: `settings.json` for providers/preferences, `history.json` for records).
+
+### Provider system
+Instead of a single API config, providers are stored as an array in the store. Each has `{id, name, endpoint, apiKey, model, temperature}`. One is marked as `activeProviderId`. Built-in presets: DeepSeek, OpenAI, OpenRouter, MiniMax. Legacy flat config is auto-migrated on first load.
+
+### Auto language detection
+`detectLanguage(text)` uses CJK Unicode ratio (>30% → Chinese). Improve and Rephrase prompts are language-agnostic (they instruct the LLM to "keep the same language as input"). Translate uses `getTranslatePrompt(sourceLang)` to dynamically set the target language.
+
 ### Why a hybrid AX API + clipboard approach?
-**Capture**: The AX API reads `kAXSelectedTextAttribute` directly from the focused UI element — instant and doesn't touch the clipboard. **Replace**: We tried `AXUIElementSetAttributeValue` for writes, but many apps (browsers, Electron apps) silently ignore it while returning success. The universally reliable approach is: copy replacement text to clipboard, activate the original app via `osascript`, and simulate `Cmd+V`. Both capture and replace require macOS Accessibility permission.
+**Capture**: The AX API reads `kAXSelectedTextAttribute` directly from the focused UI element — instant and doesn't touch the clipboard. **Replace**: We tried `AXUIElementSetAttributeValue` for writes, but many apps silently ignore it. The universally reliable approach is: clipboard + `osascript` Cmd+V.
 
-### Why a floating panel instead of a full window?
-A small, transparent, always-on-top panel that appears near the selection mimics the Grammarly experience. The user stays in context — they can see their original text in the source app while reviewing the suggestion in the panel. The panel auto-polishes on capture and offers Accept/Dismiss/Copy/Retry.
+### Auto-dismiss on blur
+The floating panel auto-hides when it loses focus (`WindowEvent::Focused(false)`). The panel gets focus on show via `set_focus()`. Stored element is NOT cleared on blur (needed for Accept to work).
 
-### UI layout (Grammarly-identical, blue theme)
-The floating panel mirrors Grammarly's layout exactly:
-1. **Top bar**: Settings icon + "Ask for a change" text input + blue send button. Allows custom re-polish instructions.
-2. **Suggestion card**: left 3px blue accent bar (`border-l-[3px] border-primary`), blue bold explanation text, inline diff (strikethrough + warm bg for deletions, subtle blue bg for insertions)
-3. **Action row** (inside accent bar area): pill-shaped outlined "Accept" button on the left, copy icon + settings dropdown on the right
-4. **Bottom mode tabs**: "Improve" / "中文" / "Translate" — text-only left-aligned tabs with active bottom-border indicator (no icons)
+### History
+Every successful polish saves a `HistoryRecord` to `history.json` via `useHistory.addRecord()`. Max 200 records. The Desktop History page shows them with search, time-ago, mode badge, and copy button.
 
 ### LLM response format (explanation + text)
-All prompts instruct the LLM to output a short explanation (first line, ≤8 words) followed by a blank line, then the polished text. `usePolish.ts` parses this at stream completion via `parseResponse()`. If no blank separator is found or the explanation is too long (>60 chars), the whole response is treated as polished text with no explanation.
+All prompts instruct the LLM to output a short explanation (first line, under 8 words) followed by a blank line, then the polished text. `usePolish.ts` parses this at stream completion via `parseResponse()`.
 
-### Why raw `fetch` instead of OpenAI SDK?
-The OpenAI SDK adds unnecessary weight and has Node.js-specific dependencies. Raw `fetch` + SSE parsing works in both Tauri WebView and browser extension contexts (for future extensibility). The client is ~60 lines of code.
-
-### Why `src/core/` is separated?
-`src/core/` contains pure TypeScript with zero React or Tauri imports. This makes it extractable into a shared `packages/core` package when the browser extension is built later.
-
-### System-wide flow (current)
+### System-wide flow
 1. User selects text in any app and presses `Cmd+Option+P`
-2. Rust backend records the frontmost app name, then uses AX API to read `AXSelectedText` and `AXBoundsForRange`
-3. Floating panel appears near the selection (without stealing focus) and auto-polishes via LLM
-4. User reviews the inline diff (with explanation) and clicks "Accept", uses Copy, or types a custom instruction in "Ask for a change"
-5. Panel hides, replacement text is copied to clipboard, original app is activated, `Cmd+V` is simulated
+2. Rust backend records the frontmost app name, uses AX API to read selected text + bounds
+3. Floating panel appears ABOVE the selection, gets focus, auto-polishes via LLM
+4. User reviews the diff and clicks Accept, uses Copy, or types in "Ask for a change"
+5. Panel hides, replacement text is copied to clipboard, original app is activated, Cmd+V simulated
+6. History record saved automatically
 
-### Settings storage
-Settings are persisted via `tauri-plugin-store` to a JSON file in the OS app data directory. The store uses `defaults` for initial values and `autoSave` for automatic persistence.
+## Git Commit Convention
+
+Use **explicit** commit messages with a type prefix:
+
+| Type | Usage | Example |
+|------|-------|---------|
+| `feat` | New feature | `feat: add desktop settings window with provider management` |
+| `fix` | Bug fix | `fix: prevent Reopen event firing after Accept` |
+| `doc` | Documentation | `doc: update AGENTS.md with multi-window architecture` |
+| `perf` | Performance | `perf: reduce AX API polling interval` |
+| `refactor` | Code restructure | `refactor: merge language-specific prompts into unified templates` |
+| `test` | Tests | `test: add unit test for language detection` |
+| `chore` | Dependencies/config | `chore: add react-router-dom dependency` |
+| `style` | Formatting | `style: fix inconsistent indentation in App.tsx` |
+| `revert` | Revert changes | `revert: revert clipboard-based replacement` |
 
 ## Coding Conventions
 
-- **Clean up after trial-and-error**: When iterating on a solution (trying multiple approaches), you MUST audit and remove dead code from abandoned approaches before considering the task done. This includes: unused functions, unused structs/types, unused imports, unused dependencies (both `Cargo.toml` and `package.json`), unused files/components, and stale permissions in `capabilities/default.json`. Do NOT leave code prefixed with `_` to suppress warnings — remove it entirely. Run `cargo check` and `npx tsc --noEmit` to verify zero warnings.
-- **Shared logic** goes in `src/core/` -- must remain free of React/Tauri imports
+- **Clean up after trial-and-error**: When iterating, audit and remove dead code from abandoned approaches. Run `cargo check` and `npx tsc --noEmit` to verify zero warnings.
+- **Shared logic** goes in `src/core/` — must remain free of React/Tauri imports
 - **Components**: one component per file, file name matches export name, use named exports
 - **No default exports** anywhere in the codebase
 - **TypeScript strict mode** enabled (`strict: true`, `noUncheckedIndexedAccess: true`)
@@ -125,6 +150,7 @@ Settings are persisted via `tauri-plugin-store` to a JSON file in the OS app dat
 - **Dark mode**: follows system preference, applied via `.dark` class on `<html>`
 - **CSS variables**: design tokens defined in `globals.css` using oklch color space
 - **Transparent window**: body background is transparent; the card component provides the visible panel
+- **Multi-window**: both windows share the same React build; routing is by window label, not URL
 
 ## Development Commands
 
@@ -141,6 +167,7 @@ pnpm tauri build      # Build the full desktop app (DMG)
 ### Frontend (npm)
 - `@tauri-apps/api` - Tauri JavaScript API (window, event, invoke)
 - `@tauri-apps/plugin-store` - Persistent settings storage
+- `react-router-dom` - (installed but routing done via window label)
 - `diff-match-patch` - Text diff computation
 - `lucide-react` - SVG icons
 
@@ -161,6 +188,6 @@ pnpm tauri build      # Build the full desktop app (DMG)
 
 - **Cross-platform**: Add Windows/Linux text access (UI Automation API, AT-SPI)
 - **Browser extension**: Extract `src/core/` into `packages/core`, build WXT-based extension
-- **More languages**: Add more polishing/translation modes
+- **More languages**: Expand `DetectedLang` and `TARGET_LANG_NAME` in translate prompt
 - **Custom prompts**: Let users define their own system prompts
-- **History**: Store recent polishing sessions
+- **Dark mode for desktop**: Add theme toggle in Preferences

@@ -1,22 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import type { PolishMode } from "@/core/llm/types";
 import { DiffView } from "@/components/DiffView";
-import { Settings } from "@/components/Settings";
 import { usePolish } from "@/hooks/usePolish";
 import { useSettings } from "@/hooks/useSettings";
+import { useHistory } from "@/hooks/useHistory";
 import {
-  Settings2,
   Loader2,
   AlertCircle,
   ShieldAlert,
   Copy,
   CheckCheck,
   SendHorizonal,
-  ChevronDown,
   ArrowDownToLine,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -32,27 +30,29 @@ interface CaptureResult {
 export function App() {
   const [inputText, setInputText] = useState("");
   const [mode, setMode] = useState<PolishMode>("improve");
-  const [settingsOpen, setSettingsOpen] = useState(false);
-
-  // Resize window when settings opens/closes
-  const openSettings = useCallback(async () => {
-    setSettingsOpen(true);
-    const win = getCurrentWindow();
-    await win.setSize(new LogicalSize(594, 480));
-  }, []);
-
-  const closeSettings = useCallback(async () => {
-    setSettingsOpen(false);
-    const win = getCurrentWindow();
-    await win.setSize(new LogicalSize(594, 197));
-  }, []);
   const [accessibilityError, setAccessibilityError] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [changeInput, setChangeInput] = useState("");
   const changeInputRef = useRef<HTMLInputElement>(null);
 
-  const { config, saveConfig, isConfigured } = useSettings();
+  const { config, isConfigured, defaultMode, activeProviderId } = useSettings();
+  const { addRecord } = useHistory();
+
+  const handlePolishComplete = useCallback(
+    (polishInputText: string, resultText: string, polishMode: PolishMode) => {
+      addRecord({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        mode: polishMode,
+        inputText: polishInputText,
+        resultText,
+        provider: activeProviderId,
+      });
+    },
+    [addRecord, activeProviderId],
+  );
+
   const {
     result,
     explanation,
@@ -62,7 +62,12 @@ export function App() {
     startPolish,
     cancelPolish,
     reset,
-  } = usePolish();
+  } = usePolish(handlePolishComplete);
+
+  // Sync mode with defaultMode from settings
+  useEffect(() => {
+    setMode(defaultMode);
+  }, [defaultMode]);
 
   // Auto-polish when text is captured
   const handleCapture = useCallback(
@@ -198,13 +203,9 @@ export function App() {
         data-tauri-drag-region
         className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-1.5"
       >
-        <button
-          onClick={openSettings}
-          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
-          title="Settings"
-        >
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground">
           <ArrowDownToLine className="h-4 w-4" />
-        </button>
+        </div>
 
         <input
           ref={changeInputRef}
@@ -231,9 +232,9 @@ export function App() {
 
       {/* ─── Accessibility error ─── */}
       {accessibilityError && (
-        <div className="flex items-center gap-3 bg-destructive/5 px-5 py-3">
+        <div className="flex items-center gap-3 bg-destructive/5 px-4 py-2">
           <ShieldAlert className="h-4 w-4 shrink-0 text-destructive" />
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Enable Accessibility:{" "}
             <span className="font-medium text-foreground">
               System Settings &rarr; Privacy &rarr; Accessibility
@@ -244,17 +245,11 @@ export function App() {
 
       {/* ─── Not configured ─── */}
       {!isConfigured && !accessibilityError && (
-        <div className="flex items-center gap-3 px-5 py-4">
-          <AlertCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            Configure your API key to get started.
+        <div className="flex items-center gap-2 px-4 py-3">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <p className="text-xs text-muted-foreground">
+            Open Polishr from the tray to configure your API key.
           </p>
-          <button
-            onClick={openSettings}
-            className="ml-auto cursor-pointer rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-opacity duration-200 hover:opacity-90"
-          >
-            Settings
-          </button>
         </div>
       )}
 
@@ -281,22 +276,19 @@ export function App() {
             </div>
           )}
 
-          {/* Suggestion card: accent bar + explanation + diff + actions */}
+          {/* Suggestion card */}
           {showDiff && (
             <div className="mx-4 my-2 border-l-[3px] border-primary px-4 py-0.5">
-              {/* Explanation */}
               {explanation && (
                 <p className="mb-1.5 text-[13px] font-bold leading-snug text-primary">
                   {explanation}
                 </p>
               )}
 
-              {/* Diff */}
               <DiffView segments={diffSegments} />
 
               {/* Action row */}
               <div className="mt-2 flex items-center">
-                {/* Accept — outlined pill */}
                 <button
                   onClick={handleAccept}
                   disabled={isReplacing}
@@ -319,29 +311,19 @@ export function App() {
                     <Copy className="h-4 w-4" />
                   )}
                 </button>
-
-                {/* Settings dropdown */}
-                <button
-                  onClick={openSettings}
-                  className="flex cursor-pointer items-center gap-0.5 rounded-md px-1 py-1 text-muted-foreground transition-colors duration-200 hover:text-foreground"
-                  title="Settings"
-                >
-                  <Settings2 className="h-4 w-4" />
-                  <ChevronDown className="h-3 w-3" />
-                </button>
               </div>
             </div>
           )}
 
           {/* Error state */}
           {error && (
-            <div className="flex items-start gap-3 px-5 py-4">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <div className="flex items-start gap-2 px-4 py-3">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
               <div className="flex-1">
-                <p className="text-sm text-destructive">{error}</p>
+                <p className="text-xs text-destructive">{error}</p>
                 <button
                   onClick={() => handleRetry()}
-                  className="mt-1 cursor-pointer text-sm font-medium text-primary hover:underline"
+                  className="mt-1 cursor-pointer text-xs font-medium text-primary hover:underline"
                 >
                   Retry
                 </button>
@@ -349,10 +331,10 @@ export function App() {
             </div>
           )}
 
-          {/* Waiting state — no text captured yet */}
+          {/* Waiting state */}
           {!result && !error && !isStreaming && !inputText && (
-            <div className="flex items-center justify-center px-5 py-6">
-              <p className="text-sm text-muted-foreground">
+            <div className="flex items-center justify-center px-4 py-4">
+              <p className="text-xs text-muted-foreground">
                 Select text and press Cmd+Option+P
               </p>
             </div>
@@ -373,7 +355,7 @@ export function App() {
         </div>
       )}
 
-      {/* ─── Bottom mode tabs (also draggable) ─── */}
+      {/* ─── Bottom mode tabs ─── */}
       <div
         data-tauri-drag-region
         className="flex shrink-0 items-center gap-5 border-t border-border px-4"
@@ -406,14 +388,6 @@ export function App() {
           );
         })}
       </div>
-
-      {/* ─── Settings modal ─── */}
-      <Settings
-        open={settingsOpen}
-        onClose={closeSettings}
-        config={config}
-        onSave={saveConfig}
-      />
     </div>
   );
 }

@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicehash/Tauri/dev/packages/tauri/schema.json",
   "identifier": "default",
-  "description": "Default capability for the main window",
-  "windows": ["main"],
+  "description": "Default capability for all windows",
+  "windows": ["main", "settings"],
   "permissions": [
     "core:default",
     "core:window:allow-hide",
@@ -14,7 +14,7 @@
     "core:window:allow-unminimize",
     "core:window:allow-close",
     "core:window:allow-start-dragging",
-    "core:window:allow-set-size",
+    "core:window:allow-create",
     "opener:default",
     "store:allow-get",
     "store:allow-set",

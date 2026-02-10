@@ -25,6 +25,19 @@
         "skipTaskbar": true,
         "visible": false,
         "center": true
+      },
+      {
+        "label": "settings",
+        "title": "Polishr — Settings",
+        "width": 900,
+        "height": 600,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "resizable": true,
+        "visible": false,
+        "center": true,
+        "url": "index.html"
       }
     ],
     "security": {

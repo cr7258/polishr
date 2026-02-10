@@ -3,8 +3,12 @@ mod ax_text;
 mod commands;
 mod tray;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::ShortcutState;
+
+/// Suppresses the next Reopen event (set when floating panel hides programmatically).
+static SUPPRESS_REOPEN: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -80,20 +84,35 @@ pub fn run() {
             commands::check_accessibility_permission,
         ])
         .on_window_event(|window, event| {
+            let label = window.label();
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     let _ = window.hide();
                 }
-                tauri::WindowEvent::Focused(false) => {
-                    // Only hide — do NOT clear stored element here.
-                    // replace_text still needs the stored app name if Accept
-                    // was clicked (which hides the window before invoking replace).
+                tauri::WindowEvent::Focused(false) if label == "main" => {
+                    // Auto-dismiss floating panel on blur.
+                    // Suppress the Reopen event that macOS fires when all windows are hidden.
+                    SUPPRESS_REOPEN.store(true, Ordering::SeqCst);
                     let _ = window.hide();
                 }
                 _ => {}
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Polishr");
+        .build(tauri::generate_context!())
+        .expect("error while building Polishr")
+        .run(|app, event| {
+            if let tauri::RunEvent::Reopen { .. } = event {
+                // If suppressed (floating panel just hid), skip this one
+                if SUPPRESS_REOPEN.swap(false, Ordering::SeqCst) {
+                    return;
+                }
+                // User clicked the Dock icon — open desktop settings
+                if let Some(window) = app.get_webview_window("settings") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }

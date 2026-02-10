@@ -27,6 +27,13 @@ function parseResponse(raw: string): { explanation: string; text: string } {
   return { explanation, text };
 }
 
+/** Callback invoked when a polish completes successfully. */
+export type OnPolishComplete = (
+  inputText: string,
+  resultText: string,
+  mode: PolishMode,
+) => void;
+
 interface UsePolishReturn {
   /** The clean polished text (explanation stripped) */
   result: string;
@@ -45,7 +52,7 @@ interface UsePolishReturn {
   reset: () => void;
 }
 
-export function usePolish(): UsePolishReturn {
+export function usePolish(onComplete?: OnPolishComplete): UsePolishReturn {
   const [result, setResult] = useState("");
   const [explanation, setExplanation] = useState("");
   const [diffSegments, setDiffSegments] = useState<DiffSegment[]>([]);
@@ -74,7 +81,6 @@ export function usePolish(): UsePolishReturn {
       config: PolishrConfig,
       customInstruction?: string,
     ) => {
-      // Cancel any in-flight request
       cancelPolish();
 
       setResult("");
@@ -86,7 +92,6 @@ export function usePolish(): UsePolishReturn {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      // Auto-detect input language
       const lang = detectLanguage(text);
 
       let accumulated = "";
@@ -101,9 +106,6 @@ export function usePolish(): UsePolishReturn {
           customInstruction,
         )) {
           accumulated += token;
-
-          // While streaming, show everything (raw) — the explanation will be
-          // separated once the stream completes.
           setResult(accumulated);
         }
 
@@ -116,9 +118,11 @@ export function usePolish(): UsePolishReturn {
         // Compute diff on the clean polished text
         const segments = computeDiff(text, polished);
         setDiffSegments(segments);
+
+        // Notify completion for history saving
+        onComplete?.(text, polished, mode);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
-          // User cancelled, not an error
           return;
         }
         if (err instanceof PolishError) {
@@ -133,7 +137,7 @@ export function usePolish(): UsePolishReturn {
         abortRef.current = null;
       }
     },
-    [cancelPolish],
+    [cancelPolish, onComplete],
   );
 
   return {
