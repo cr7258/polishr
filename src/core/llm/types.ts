@@ -5,7 +5,7 @@ export interface PolishrConfig {
   temperature: number;
 }
 
-export type PolishMode = "polish-en" | "polish-zh" | "translate";
+export type PolishMode = "improve" | "rephrase" | "translate";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";

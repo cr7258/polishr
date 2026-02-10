@@ -31,7 +31,7 @@ interface CaptureResult {
 
 export function App() {
   const [inputText, setInputText] = useState("");
-  const [mode, setMode] = useState<PolishMode>("polish-en");
+  const [mode, setMode] = useState<PolishMode>("improve");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accessibilityError, setAccessibilityError] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
@@ -172,11 +172,11 @@ export function App() {
   const showStreamingResult = isStreaming && result.length > 0;
 
   const modeLabels: Record<PolishMode, string> = {
-    "polish-en": "Improve",
-    "polish-zh": "中文",
+    improve: "Improve",
+    rephrase: "Rephrase",
     translate: "Translate",
   };
-  const modes: PolishMode[] = ["polish-en", "polish-zh", "translate"];
+  const modes: PolishMode[] = ["improve", "rephrase", "translate"];
 
   return (
     <div className="flex h-screen flex-col overflow-hidden rounded-lg bg-card shadow-[0_4px_24px_rgba(0,0,0,0.1)]">

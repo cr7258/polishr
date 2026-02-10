@@ -1,4 +1,5 @@
 import type { PolishrConfig, PolishMode, ChatMessage } from "./types";
+import type { DetectedLang } from "../lang/detect";
 import { getPrompt } from "../prompts";
 import { parseSSEStream } from "./stream";
 
@@ -16,17 +17,19 @@ export class PolishError extends Error {
  * Stream a polishing/translation request to an OpenAI-compatible API.
  * Yields content tokens as they arrive.
  *
+ * @param lang - Detected language of the input text.
  * @param customInstruction - Optional free-form instruction from the user
  *   (e.g. "make it more formal"). Appended to the user message.
  */
 export async function* polishStream(
   text: string,
   mode: PolishMode,
+  lang: DetectedLang,
   config: PolishrConfig,
   signal?: AbortSignal,
   customInstruction?: string,
 ): AsyncGenerator<string> {
-  const systemPrompt = getPrompt(mode);
+  const systemPrompt = getPrompt(mode, lang);
 
   const userContent = customInstruction
     ? `${text}\n\n[Additional instruction from user: ${customInstruction}]`
@@ -84,6 +87,7 @@ export async function* polishStream(
 export async function polish(
   text: string,
   mode: PolishMode,
+  lang: DetectedLang,
   config: PolishrConfig,
   signal?: AbortSignal,
   customInstruction?: string,
@@ -92,6 +96,7 @@ export async function polish(
   for await (const token of polishStream(
     text,
     mode,
+    lang,
     config,
     signal,
     customInstruction,

@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from "react";
 import type { PolishrConfig, PolishMode } from "@/core/llm/types";
 import { polishStream, PolishError } from "@/core/llm/client";
 import { computeDiff, type DiffSegment } from "@/core/diff/differ";
+import { detectLanguage } from "@/core/lang/detect";
 
 /**
  * Parse the LLM response into explanation + polished text.
@@ -85,12 +86,16 @@ export function usePolish(): UsePolishReturn {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Auto-detect input language
+      const lang = detectLanguage(text);
+
       let accumulated = "";
 
       try {
         for await (const token of polishStream(
           text,
           mode,
+          lang,
           config,
           controller.signal,
           customInstruction,
