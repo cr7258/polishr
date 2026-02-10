@@ -110,6 +110,6 @@
   }
   body {
     @apply text-foreground;
-    padding: 8px;
+    padding: 6px;
   }
 }
