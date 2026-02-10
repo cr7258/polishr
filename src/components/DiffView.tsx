@@ -10,7 +10,7 @@ export function DiffView({ segments }: DiffViewProps) {
   }
 
   return (
-    <div className="text-[15px] leading-relaxed text-foreground">
+    <div className="text-[13px] leading-relaxed text-foreground">
       {segments.map((segment, i) => {
         if (segment.type === "equal") {
           return <span key={i}>{segment.text}</span>;

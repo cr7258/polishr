@@ -179,18 +179,18 @@ export function App() {
   const modes: PolishMode[] = ["polish-en", "polish-zh", "translate"];
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
+    <div className="flex h-screen flex-col overflow-hidden rounded-lg bg-card shadow-[0_4px_24px_rgba(0,0,0,0.1)]">
       {/* ─── Top bar: "Ask for a change" input ─── */}
       <div
         data-tauri-drag-region
-        className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-2"
+        className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-1.5"
       >
         <button
           onClick={() => setSettingsOpen(true)}
-          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
+          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
           title="Settings"
         >
-          <ArrowDownToLine className="h-[18px] w-[18px]" />
+          <ArrowDownToLine className="h-4 w-4" />
         </button>
 
         <input
@@ -203,16 +203,16 @@ export function App() {
           }}
           placeholder="Ask for a change"
           disabled={!inputText || isStreaming}
-          className="min-w-0 flex-1 bg-transparent text-[15px] text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+          className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
         />
 
         <button
           onClick={handleSendChange}
           disabled={!changeInput.trim() || !inputText || isStreaming}
-          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity duration-200 hover:opacity-90 disabled:cursor-default disabled:opacity-30"
+          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity duration-200 hover:opacity-90 disabled:cursor-default disabled:opacity-30"
           title="Send"
         >
-          <SendHorizonal className="h-4 w-4" />
+          <SendHorizonal className="h-3.5 w-3.5" />
         </button>
       </div>
 
@@ -250,9 +250,9 @@ export function App() {
         <div className="min-h-0 flex-1 overflow-y-auto">
           {/* Loading spinner */}
           {isStreaming && !showStreamingResult && (
-            <div className="flex items-center gap-3 px-5 py-4">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              <span className="text-[15px] text-muted-foreground">
+            <div className="flex items-center gap-2 px-4 py-3">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <span className="text-[13px] text-muted-foreground">
                 Polishing...
               </span>
             </div>
@@ -260,20 +260,20 @@ export function App() {
 
           {/* Streaming raw result */}
           {showStreamingResult && !showDiff && (
-            <div className="mx-5 my-3 border-l-[3px] border-primary px-5 py-1">
-              <p className="text-[15px] leading-relaxed text-foreground">
+            <div className="mx-4 my-2 border-l-[3px] border-primary px-4 py-0.5">
+              <p className="text-[13px] leading-relaxed text-foreground">
                 {result}
-                <span className="ml-0.5 inline-block h-[18px] w-[2px] animate-pulse bg-primary align-text-bottom" />
+                <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-primary align-text-bottom" />
               </p>
             </div>
           )}
 
           {/* Suggestion card: accent bar + explanation + diff + actions */}
           {showDiff && (
-            <div className="mx-5 my-3 border-l-[3px] border-primary px-5 py-1">
+            <div className="mx-4 my-2 border-l-[3px] border-primary px-4 py-0.5">
               {/* Explanation */}
               {explanation && (
-                <p className="mb-2 text-[15px] font-bold leading-snug text-primary">
+                <p className="mb-1.5 text-[13px] font-bold leading-snug text-primary">
                   {explanation}
                 </p>
               )}
@@ -282,12 +282,12 @@ export function App() {
               <DiffView segments={diffSegments} />
 
               {/* Action row */}
-              <div className="mt-3 flex items-center">
+              <div className="mt-2 flex items-center">
                 {/* Accept — outlined pill */}
                 <button
                   onClick={handleAccept}
                   disabled={isReplacing}
-                  className="cursor-pointer rounded-full border border-border px-5 py-1.5 text-sm font-medium text-foreground transition-colors duration-200 hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                  className="cursor-pointer rounded-full border border-border px-4 py-1 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
                 >
                   {isReplacing ? "Replacing..." : "Accept"}
                 </button>
@@ -297,24 +297,24 @@ export function App() {
                 {/* Copy */}
                 <button
                   onClick={handleCopy}
-                  className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:text-foreground"
+                  className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-200 hover:text-foreground"
                   title="Copy to clipboard"
                 >
                   {copied ? (
-                    <CheckCheck className="h-[18px] w-[18px] text-primary" />
+                    <CheckCheck className="h-4 w-4 text-primary" />
                   ) : (
-                    <Copy className="h-[18px] w-[18px]" />
+                    <Copy className="h-4 w-4" />
                   )}
                 </button>
 
                 {/* Settings dropdown */}
                 <button
                   onClick={() => setSettingsOpen(true)}
-                  className="flex cursor-pointer items-center gap-0.5 rounded-lg px-1.5 py-1.5 text-muted-foreground transition-colors duration-200 hover:text-foreground"
+                  className="flex cursor-pointer items-center gap-0.5 rounded-md px-1 py-1 text-muted-foreground transition-colors duration-200 hover:text-foreground"
                   title="Settings"
                 >
-                  <Settings2 className="h-[18px] w-[18px]" />
-                  <ChevronDown className="h-3.5 w-3.5" />
+                  <Settings2 className="h-4 w-4" />
+                  <ChevronDown className="h-3 w-3" />
                 </button>
               </div>
             </div>
@@ -349,11 +349,11 @@ export function App() {
 
       {/* ─── Streaming stop bar ─── */}
       {isStreaming && (
-        <div className="flex shrink-0 items-center border-t border-border px-5 py-2">
+        <div className="flex shrink-0 items-center border-t border-border px-4 py-1.5">
           <div className="flex-1" />
           <button
             onClick={cancelPolish}
-            className="cursor-pointer rounded-full border border-destructive/30 px-4 py-1 text-sm font-medium text-destructive transition-colors duration-200 hover:bg-destructive/5"
+            className="cursor-pointer rounded-full border border-destructive/30 px-3 py-0.5 text-xs font-medium text-destructive transition-colors duration-200 hover:bg-destructive/5"
           >
             Stop
           </button>
@@ -363,7 +363,7 @@ export function App() {
       {/* ─── Bottom mode tabs (also draggable) ─── */}
       <div
         data-tauri-drag-region
-        className="flex shrink-0 items-center gap-7 border-t border-border px-5"
+        className="flex shrink-0 items-center gap-5 border-t border-border px-4"
       >
         {modes.map((m) => {
           const isActive = mode === m;
@@ -381,7 +381,7 @@ export function App() {
               }}
               disabled={isStreaming}
               className={cn(
-                "cursor-pointer border-b-2 py-2.5 text-[14px] transition-colors duration-200",
+                "cursor-pointer border-b-2 py-2 text-[13px] transition-colors duration-200",
                 isActive
                   ? "border-primary font-semibold text-primary"
                   : "border-transparent font-normal text-muted-foreground hover:text-foreground",

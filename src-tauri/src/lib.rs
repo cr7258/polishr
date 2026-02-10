@@ -30,7 +30,7 @@ pub fn run() {
 
                                     // Position the floating panel ABOVE the selection
                                     if let Some(window) = handle.get_webview_window("main") {
-                                        let panel_height = 230.0_f64; // matches tauri.conf.json
+                                        let panel_height = 197.0_f64; // matches tauri.conf.json
                                         let panel_x = result.x;
                                         // Place above: selection top - panel height - gap
                                         let panel_y = result.y - panel_height - 8.0;
