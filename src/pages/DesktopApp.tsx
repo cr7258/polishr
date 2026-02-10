@@ -96,8 +96,8 @@ export function DesktopApp() {
         </nav>
 
         {/* Version */}
-        <div className="px-5 py-4">
-          <div className="text-[11px] text-white/25">v0.1.0</div>
+        <div className="mx-3 mb-4 rounded-xl bg-white/[0.04] px-4 py-2.5">
+          <span className="text-[12px] font-medium text-white/30">Polishr v0.1.0</span>
         </div>
       </aside>
 
