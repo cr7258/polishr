@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 
 import type { PolishMode } from "@/core/llm/types";
 import { DiffView } from "@/components/DiffView";
@@ -33,6 +33,19 @@ export function App() {
   const [inputText, setInputText] = useState("");
   const [mode, setMode] = useState<PolishMode>("improve");
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Resize window when settings opens/closes
+  const openSettings = useCallback(async () => {
+    setSettingsOpen(true);
+    const win = getCurrentWindow();
+    await win.setSize(new LogicalSize(594, 480));
+  }, []);
+
+  const closeSettings = useCallback(async () => {
+    setSettingsOpen(false);
+    const win = getCurrentWindow();
+    await win.setSize(new LogicalSize(594, 197));
+  }, []);
   const [accessibilityError, setAccessibilityError] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -186,7 +199,7 @@ export function App() {
         className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-1.5"
       >
         <button
-          onClick={() => setSettingsOpen(true)}
+          onClick={openSettings}
           className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
           title="Settings"
         >
@@ -237,7 +250,7 @@ export function App() {
             Configure your API key to get started.
           </p>
           <button
-            onClick={() => setSettingsOpen(true)}
+            onClick={openSettings}
             className="ml-auto cursor-pointer rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-opacity duration-200 hover:opacity-90"
           >
             Settings
@@ -309,7 +322,7 @@ export function App() {
 
                 {/* Settings dropdown */}
                 <button
-                  onClick={() => setSettingsOpen(true)}
+                  onClick={openSettings}
                   className="flex cursor-pointer items-center gap-0.5 rounded-md px-1 py-1 text-muted-foreground transition-colors duration-200 hover:text-foreground"
                   title="Settings"
                 >
@@ -397,7 +410,7 @@ export function App() {
       {/* ─── Settings modal ─── */}
       <Settings
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={closeSettings}
         config={config}
         onSave={saveConfig}
       />
