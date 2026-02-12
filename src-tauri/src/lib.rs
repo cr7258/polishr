@@ -10,6 +10,106 @@ use tauri_plugin_global_shortcut::ShortcutState;
 /// Suppresses the next Reopen event (set when floating panel hides programmatically).
 static SUPPRESS_REOPEN: AtomicBool = AtomicBool::new(false);
 
+const TRIGGER_WINDOW_WIDTH: f64 = 16.0;
+const TRIGGER_WINDOW_HEIGHT: f64 = 16.0;
+const TRIGGER_WINDOW_GAP: f64 = 6.0;
+const SCREEN_EDGE_PADDING: f64 = 4.0;
+
+#[cfg(target_os = "macos")]
+fn start_selection_trigger_poller(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut pinned_selection: Option<(usize, f64, f64, f64, f64, f64)> = None;
+        let mut pinned_button: Option<(f64, f64)> = None;
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(350));
+
+            let Some(trigger_window) = app.get_webview_window("trigger") else {
+                continue;
+            };
+
+            let main_is_visible = app
+                .get_webview_window("main")
+                .and_then(|window| window.is_visible().ok())
+                .unwrap_or(false);
+            let settings_is_focused = app
+                .get_webview_window("settings")
+                .and_then(|window| window.is_focused().ok())
+                .unwrap_or(false);
+            let trigger_is_focused = trigger_window.is_focused().unwrap_or(false);
+
+            if main_is_visible || settings_is_focused {
+                let _ = trigger_window.hide();
+                pinned_selection = None;
+                pinned_button = None;
+                continue;
+            }
+            if trigger_is_focused {
+                continue;
+            }
+
+            match commands::peek_and_locate_sync() {
+                Ok(result) => {
+                    commands::cache_capture(Some(result.clone()));
+
+                    let line_anchor_x = result.line_start_x.unwrap_or(result.x);
+                    let button_x =
+                        (line_anchor_x - TRIGGER_WINDOW_WIDTH - TRIGGER_WINDOW_GAP).max(SCREEN_EDGE_PADDING);
+                    let button_y =
+                        (result.y + (result.height - TRIGGER_WINDOW_HEIGHT) / 2.0).max(SCREEN_EDGE_PADDING);
+
+                    let selection_changed = match pinned_selection {
+                        Some((text_len, x, y, width, height, anchor_x)) => {
+                            text_len != result.text.len()
+                                || (x - result.x).abs() > 0.5
+                                || (y - result.y).abs() > 0.5
+                                || (width - result.width).abs() > 0.5
+                                || (height - result.height).abs() > 0.5
+                                || (anchor_x - line_anchor_x).abs() > 0.5
+                        }
+                        None => true,
+                    };
+
+                    if selection_changed {
+                        if let Err(err) = ax_text::cache_frontmost_app_for_replace() {
+                            println!("[Polishr] Failed to cache frontmost app for replace: {}", err);
+                        }
+                        pinned_selection = Some((
+                            result.text.len(),
+                            result.x,
+                            result.y,
+                            result.width,
+                            result.height,
+                            line_anchor_x,
+                        ));
+                    }
+
+                    let button_changed = match pinned_button {
+                        Some((x, y)) => (x - button_x).abs() > 0.5 || (y - button_y).abs() > 0.5,
+                        None => true,
+                    };
+
+                    if button_changed {
+                        let pos = tauri::LogicalPosition::new(button_x, button_y);
+                        let _ = trigger_window.set_position(tauri::Position::Logical(pos));
+                        pinned_button = Some((button_x, button_y));
+                    }
+                    let _ = trigger_window.show();
+                }
+                Err(_err) => {
+                    commands::cache_capture(None);
+                    pinned_selection = None;
+                    pinned_button = None;
+                    let _ = trigger_window.hide();
+                }
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_selection_trigger_poller(_app: tauri::AppHandle) {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -31,26 +131,7 @@ pub fn run() {
                                         result.x,
                                         result.y
                                     );
-
-                                    // Position the floating panel ABOVE the selection
-                                    if let Some(window) = handle.get_webview_window("main") {
-                                        let panel_height = 197.0_f64; // matches tauri.conf.json
-                                        let panel_x = result.x;
-                                        // Place above: selection top - panel height - gap
-                                        let panel_y = result.y - panel_height - 8.0;
-                                        // If that would go off the top of the screen, place below instead
-                                        let panel_y = if panel_y < 0.0 {
-                                            result.y + result.height + 8.0
-                                        } else {
-                                            panel_y
-                                        };
-
-                                        let pos = tauri::LogicalPosition::new(panel_x, panel_y);
-                                        let _ = window.set_position(tauri::Position::Logical(pos));
-                                        let _ = window.show();
-                                        let _ = window.set_focus();
-                                    }
-
+                                    commands::show_main_panel(&handle, &result);
                                     let _ = handle.emit("selection-captured", result);
                                 }
                                 Err(err) => {
@@ -74,11 +155,13 @@ pub fn run() {
 
             // Create system tray
             tray::create_tray(app.handle())?;
+            start_selection_trigger_poller(app.handle().clone());
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::capture_and_locate,
+            commands::open_main_from_cached_selection,
             commands::replace_text,
             commands::dismiss,
             commands::check_accessibility_permission,

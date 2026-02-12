@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { App } from "./App";
+import { TriggerWindow } from "./TriggerWindow";
 import { DesktopApp } from "./pages/DesktopApp";
 import "./styles/globals.css";
 
@@ -11,6 +12,9 @@ function Root() {
   // Route by Tauri window label
   if (label === "settings") {
     return <DesktopApp />;
+  }
+  if (label === "trigger") {
+    return <TriggerWindow />;
   }
   return <App />;
 }

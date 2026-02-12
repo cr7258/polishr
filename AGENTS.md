@@ -10,10 +10,11 @@ Polishr is a Grammarly-like desktop application for grammar polishing and transl
 - **Rephrase**: Rewrite with different words/structure (auto-detects language)
 - **Translate**: Translate between Chinese and English (auto-detects source, translates to opposite)
 
-The app has **two windows** in a single Tauri process:
+The app has **three windows** in a single Tauri process:
 
 1. **Floating Panel** (`main` window) — compact, transparent, always-on-top panel near the selection. Shows explanation + diff + accept/copy actions. Appears on `Cmd+Option+P`. Auto-dismisses on focus loss.
-2. **Desktop Settings** (`settings` window) — full settings window with sidebar navigation. Configures API providers, views history, sets preferences. Opens from tray menu.
+2. **Selection Trigger** (`trigger` window) — tiny always-on-top circular button shown near selected text. Clicking it opens the floating panel without pressing a shortcut.
+3. **Desktop Settings** (`settings` window) — full settings window with sidebar navigation. Configures API providers, views history, sets preferences. Opens from tray menu.
 
 ## Tech Stack
 
@@ -21,7 +22,7 @@ The app has **two windows** in a single Tauri process:
 |-------|-----------|
 | Desktop framework | Tauri v2 (Rust backend + WebView frontend) |
 | Frontend | React 19 + TypeScript |
-| Routing | Window label detection (`main` vs `settings`) |
+| Routing | Window label detection (`main` / `trigger` / `settings`) |
 | Styling | TailwindCSS 4 + custom design tokens (shadcn/ui pattern) |
 | Build tool | Vite |
 | LLM integration | OpenAI-compatible API via raw `fetch` + SSE streaming |
@@ -41,8 +42,10 @@ polishr/
 ├── index.html
 ├── AGENTS.md                     # This file - agent knowledge base
 ├── src/                          # React frontend
-│   ├── main.tsx                  # Entry: routes by window label (main→App, settings→DesktopApp)
+│   ├── main.tsx                  # Entry: routes by window label (main→App, trigger→TriggerWindow, settings→DesktopApp)
 │   ├── App.tsx                   # Floating panel root component
+│   ├── TriggerWindow.tsx         # Tiny selection-trigger button window
+│   ├── TriggerWindow.css         # Component-scoped trigger styles
 │   ├── vite-env.d.ts
 │   ├── lib/
 │   │   └── utils.ts              # cn() utility for class merging
@@ -76,14 +79,14 @@ polishr/
 ├── src-tauri/                    # Rust backend
 │   ├── Cargo.toml
 │   ├── build.rs
-│   ├── tauri.conf.json           # Two windows: main (floating) + settings (desktop)
+│   ├── tauri.conf.json           # Three windows: main (floating), trigger (selection button), settings (desktop)
 │   ├── capabilities/
-│   │   └── default.json          # Plugin permissions for both windows
+│   │   └── default.json          # Plugin permissions for all windows
 │   └── src/
 │       ├── main.rs               # Entry point
-│       ├── lib.rs                # Tauri app setup, hotkey handler, window positioning, blur-dismiss
+│       ├── lib.rs                # Tauri app setup, hotkey handler, trigger poller, window positioning, blur-dismiss
 │       ├── ax_text.rs            # macOS AX API FFI (read selected text, get bounds) + clipboard/paste helpers
-│       ├── commands.rs           # capture_and_locate, replace_text, dismiss, check_accessibility_permission
+│       ├── commands.rs           # capture, cached selection open, replace_text, dismiss, permission check
 │       └── tray.rs               # System tray: "Settings" opens desktop window, "Quit" exits
 └── .cursor/
     └── rules/
@@ -93,7 +96,10 @@ polishr/
 ## Architecture Decisions
 
 ### Multi-window architecture
-Both the floating panel and desktop settings share a single Tauri process. `main.tsx` checks `getCurrentWindow().label` to decide which React tree to render. Data is shared via `tauri-plugin-store` (two store files: `settings.json` for providers/preferences, `history.json` for records).
+The floating panel, selection trigger, and desktop settings share a single Tauri process. `main.tsx` checks `getCurrentWindow().label` to decide which React tree to render. Data is shared via `tauri-plugin-store` (two store files: `settings.json` for providers/preferences, `history.json` for records).
+
+### Passive selection trigger (Grammarly-style)
+On macOS, a background poller in `lib.rs` checks current AX selection roughly every 350ms. Polling uses a lightweight AX read path (`peek_selection_ax`) that skips frontmost-app storage. If valid selected text exists and the main panel is not visible, it positions the `trigger` window to the left of the selection and shows it. Clicking the trigger calls `open_main_from_cached_selection`, which reuses cached capture data to open `main` without re-capturing after focus shift.
 
 ### Provider system
 Instead of a single API config, providers are stored as an array in the store. Each has `{id, name, endpoint, apiKey, model, temperature}`. One is marked as `activeProviderId`. Built-in presets: DeepSeek, OpenAI, OpenRouter, MiniMax. Legacy flat config is auto-migrated on first load.
@@ -114,10 +120,10 @@ Every successful polish saves a `HistoryRecord` to `history.json` via `useHistor
 All prompts instruct the LLM to output a short explanation (first line, under 8 words) followed by a blank line, then the polished text. `usePolish.ts` parses this at stream completion via `parseResponse()`.
 
 ### System-wide flow
-1. User selects text in any app and presses `Cmd+Option+P`
-2. Rust backend records the frontmost app name, uses AX API to read selected text + bounds
-3. Floating panel appears ABOVE the selection, gets focus, auto-polishes via LLM
-4. User reviews the diff and clicks Accept, uses Copy, or types in "Ask for a change"
+1. User selects text in any app
+2. User either presses `Cmd+Option+P` or clicks the small `trigger` button shown near the selection
+3. Rust backend uses AX API to read selected text + bounds (or cached selection from the poller) and opens `main` above the selection
+4. Floating panel auto-polishes via LLM; user reviews the diff and clicks Accept/Copy or enters "Ask for a change"
 5. Panel hides, replacement text is copied to clipboard, original app is activated, Cmd+V simulated
 6. History record saved automatically
 
@@ -150,7 +156,7 @@ Use **explicit** commit messages with a type prefix:
 - **Dark mode**: follows system preference, applied via `.dark` class on `<html>`
 - **CSS variables**: design tokens defined in `globals.css` using oklch color space
 - **Transparent window**: body background is transparent; the card component provides the visible panel
-- **Multi-window**: both windows share the same React build; routing is by window label, not URL
+- **Multi-window**: all windows share the same React build; routing is by window label, not URL
 
 ## Development Commands
 
