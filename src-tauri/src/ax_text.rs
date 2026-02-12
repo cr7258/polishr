@@ -20,6 +20,7 @@ type AXValueRef = CFTypeRef;
 type AXError = i32;
 
 const K_AX_ERROR_SUCCESS: AXError = 0;
+const K_AX_VALUE_CF_RANGE_TYPE: i32 = 4;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -42,6 +43,13 @@ struct CGRect {
     size: CGSize,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct CFRange {
+    location: isize,
+    length: isize,
+}
+
 const K_AX_VALUE_CG_RECT_TYPE: i32 = 3;
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -59,6 +67,7 @@ extern "C" {
         parameter: CFTypeRef,
         result: *mut CFTypeRef,
     ) -> AXError;
+    fn AXValueCreate(value_type: i32, value_ptr: *const c_void) -> AXValueRef;
     fn AXValueGetValue(value: AXValueRef, value_type: i32, value_out: *mut c_void) -> bool;
 }
 
@@ -99,6 +108,15 @@ fn get_stored_app_name() -> Option<String> {
 pub fn clear_stored_element() {
     let mut stored = STORED_APP_NAME.lock().unwrap();
     *stored = None;
+}
+
+/// Cache the current frontmost application for later replacement.
+/// Intended for passive trigger flow where we avoid full capture.
+pub fn cache_frontmost_app_for_replace() -> Result<(), String> {
+    let app_name = get_frontmost_app_name()
+        .ok_or_else(|| "no_frontmost_app".to_string())?;
+    store_app_name(Some(app_name));
+    Ok(())
 }
 
 // --- AX Attribute key helpers ---
@@ -233,14 +251,60 @@ fn read_selected_text(element: AXUIElementRef) -> Option<String> {
     None
 }
 
-/// Get the screen bounds of the current text selection.
-fn get_selection_bounds(element: AXUIElementRef) -> Option<SelectionBounds> {
+/// Read full text value from a UI element.
+fn read_element_value_text(element: AXUIElementRef) -> Option<String> {
     unsafe {
-        let range_attr = ax_attr("AXSelectedTextRange");
-        let mut range_value: CFTypeRef = ptr::null();
-        let err = AXUIElementCopyAttributeValue(element, range_attr, &mut range_value);
-        CFRelease(range_attr);
-        if err != K_AX_ERROR_SUCCESS || range_value.is_null() {
+        let attr = ax_attr("AXValue");
+        let mut value: CFTypeRef = ptr::null();
+        let err = AXUIElementCopyAttributeValue(element, attr, &mut value);
+        CFRelease(attr);
+        if err == K_AX_ERROR_SUCCESS && !value.is_null() {
+            let result = cfstring_to_rust(value as CFStringRef);
+            CFRelease(value);
+            return result;
+        }
+    }
+    None
+}
+
+/// Read selected text range from a UI element.
+fn get_selected_text_range(element: AXUIElementRef) -> Option<CFRange> {
+    unsafe {
+        let attr = ax_attr("AXSelectedTextRange");
+        let mut value: CFTypeRef = ptr::null();
+        let err = AXUIElementCopyAttributeValue(element, attr, &mut value);
+        CFRelease(attr);
+        if err != K_AX_ERROR_SUCCESS || value.is_null() {
+            return None;
+        }
+
+        let mut range = CFRange {
+            location: 0,
+            length: 0,
+        };
+        let ok = AXValueGetValue(
+            value as AXValueRef,
+            K_AX_VALUE_CF_RANGE_TYPE,
+            &mut range as *mut CFRange as *mut c_void,
+        );
+        CFRelease(value);
+
+        if ok { Some(range) } else { None }
+    }
+}
+
+fn get_bounds_for_range(
+    element: AXUIElementRef,
+    location: isize,
+    length: isize,
+) -> Option<SelectionBounds> {
+    unsafe {
+        let range = CFRange { location, length };
+        let range_value = AXValueCreate(
+            K_AX_VALUE_CF_RANGE_TYPE,
+            &range as *const CFRange as *const c_void,
+        );
+        if range_value.is_null() {
             return None;
         }
 
@@ -264,7 +328,7 @@ fn get_selection_bounds(element: AXUIElementRef) -> Option<SelectionBounds> {
             size: CGSize { width: 0.0, height: 0.0 },
         };
         let ok = AXValueGetValue(
-            bounds_value,
+            bounds_value as AXValueRef,
             K_AX_VALUE_CG_RECT_TYPE,
             &mut rect as *mut CGRect as *mut c_void,
         );
@@ -283,6 +347,51 @@ fn get_selection_bounds(element: AXUIElementRef) -> Option<SelectionBounds> {
     }
 }
 
+/// Find the leftmost x of the current wrapped line.
+fn get_current_line_start_x(element: AXUIElementRef) -> Option<f64> {
+    let range = get_selected_text_range(element)?;
+    let value = read_element_value_text(element)?;
+    let value_utf16: Vec<u16> = value.encode_utf16().collect();
+    let text_len = value_utf16.len() as isize;
+    let mut cursor = range.location.max(0).min(text_len);
+
+    // Some apps cannot return bounds for the exact selection start (for example,
+    // when the caret is at the end). Step back one UTF-16 code unit as fallback.
+    let current_bounds = get_bounds_for_range(element, cursor, 0).or_else(|| {
+        if cursor > 0 {
+            get_bounds_for_range(element, cursor - 1, 0)
+        } else {
+            None
+        }
+    })?;
+    let current_line_y = current_bounds.y;
+
+    // Walk backward until the previous glyph is on a different visual row.
+    // This handles soft-wrapped lines where there is no '\n'.
+    let mut steps = 0usize;
+    const MAX_BACKTRACK_STEPS: usize = 512;
+    while cursor > 0 && steps < MAX_BACKTRACK_STEPS {
+        let prev_cursor = cursor - 1;
+        let Some(prev_bounds) = get_bounds_for_range(element, prev_cursor, 0) else {
+            break;
+        };
+        if (prev_bounds.y - current_line_y).abs() > 1.0 {
+            break;
+        }
+        cursor = prev_cursor;
+        steps += 1;
+    }
+
+    let line_bounds = get_bounds_for_range(element, cursor, 0)?;
+    Some(line_bounds.x)
+}
+
+/// Get the screen bounds of the current text selection.
+fn get_selection_bounds(element: AXUIElementRef) -> Option<SelectionBounds> {
+    let range = get_selected_text_range(element)?;
+    get_bounds_for_range(element, range.location, range.length)
+}
+
 // --- Public API ---
 
 #[derive(Debug, Serialize, Clone)]
@@ -297,6 +406,7 @@ pub struct SelectionBounds {
 pub struct CaptureResult {
     pub text: String,
     pub bounds: Option<SelectionBounds>,
+    pub line_start_x: Option<f64>,
 }
 
 /// Check if the process has accessibility permission.
@@ -307,13 +417,31 @@ pub fn is_accessibility_granted() -> bool {
 /// Capture selected text and its screen position from the currently focused element.
 /// Also stores the frontmost app name for later replacement via clipboard+paste.
 pub fn capture_selection_ax() -> Result<CaptureResult, String> {
+    capture_selection_ax_internal(true)
+}
+
+/// Lightweight capture for passive polling.
+/// Does not query/store frontmost app name to avoid frequent osascript calls.
+pub fn peek_selection_ax() -> Result<CaptureResult, String> {
+    capture_selection_ax_internal(false)
+}
+
+fn capture_selection_ax_internal(should_store_app: bool) -> Result<CaptureResult, String> {
     if !is_accessibility_granted() {
         return Err("accessibility_denied".to_string());
     }
 
-    // Get the frontmost app name BEFORE any focus changes
-    let app_name = get_frontmost_app_name();
-    println!("[Polishr] Frontmost app: {:?}", app_name);
+    // Get the frontmost app name BEFORE any focus changes.
+    // Only needed when we intend to replace text later.
+    let app_name = if should_store_app {
+        get_frontmost_app_name()
+    } else {
+        None
+    };
+
+    if should_store_app {
+        println!("[Polishr] Frontmost app: {:?}", app_name);
+    }
 
     let element = get_focused_element()
         .ok_or_else(|| "no_focused_element".to_string())?;
@@ -330,19 +458,28 @@ pub fn capture_selection_ax() -> Result<CaptureResult, String> {
     }
 
     let bounds = get_selection_bounds(element);
+    let line_start_x = get_current_line_start_x(element);
 
     // Store the app name for later replacement
-    store_app_name(app_name);
+    if should_store_app {
+        store_app_name(app_name);
+    }
 
     unsafe { CFRelease(element); }
 
-    println!(
-        "[Polishr] AX capture: {} chars, bounds={:?}",
-        text.len(),
-        bounds
-    );
+    if should_store_app {
+        println!(
+            "[Polishr] AX capture: {} chars, bounds={:?}",
+            text.len(),
+            bounds
+        );
+    }
 
-    Ok(CaptureResult { text, bounds })
+    Ok(CaptureResult {
+        text,
+        bounds,
+        line_start_x,
+    })
 }
 
 /// Replace the selected text using clipboard + paste.

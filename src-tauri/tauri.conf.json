@@ -27,6 +27,19 @@
         "center": true
       },
       {
+        "label": "trigger",
+        "title": "Polishr Trigger",
+        "width": 16,
+        "height": 16,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
         "label": "settings",
         "title": "Polishr — Settings",
         "width": 900,
