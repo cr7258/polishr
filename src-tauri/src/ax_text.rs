@@ -67,6 +67,11 @@ extern "C" {
         parameter: CFTypeRef,
         result: *mut CFTypeRef,
     ) -> AXError;
+    fn AXUIElementSetAttributeValue(
+        element: AXUIElementRef,
+        attribute: CFStringRef,
+        value: CFTypeRef,
+    ) -> AXError;
     fn AXValueCreate(value_type: i32, value_ptr: *const c_void) -> AXValueRef;
     fn AXValueGetValue(value: AXValueRef, value_type: i32, value_out: *mut c_void) -> bool;
 }
@@ -480,6 +485,143 @@ fn capture_selection_ax_internal(should_store_app: bool) -> Result<CaptureResult
         bounds,
         line_start_x,
     })
+}
+
+/// Result of detecting the paragraph around the cursor (no selection).
+#[derive(Debug, Serialize, Clone)]
+pub struct ParagraphResult {
+    /// The full paragraph text (between newlines).
+    pub text: String,
+    /// Visual bounds of the paragraph.
+    pub bounds: Option<SelectionBounds>,
+    /// Leftmost x of the first line in the paragraph.
+    pub line_start_x: Option<f64>,
+    /// UTF-16 offset of the paragraph start within the element's AXValue.
+    pub range_location: isize,
+    /// UTF-16 length of the paragraph.
+    pub range_length: isize,
+}
+
+/// Detect the paragraph around the current cursor position.
+/// Only works when there is no active selection (caret only).
+/// Finds paragraph boundaries by scanning for `\n` in AXValue.
+pub fn peek_paragraph_ax() -> Result<ParagraphResult, String> {
+    if !is_accessibility_granted() {
+        return Err("accessibility_denied".to_string());
+    }
+
+    let element = get_focused_element()
+        .ok_or_else(|| "no_focused_element".to_string())?;
+
+    // Check that there is a caret but no selection
+    let range = match get_selected_text_range(element) {
+        Some(r) => r,
+        None => {
+            unsafe { CFRelease(element); }
+            return Err("no_text_range".to_string());
+        }
+    };
+
+    // If there is a non-empty selection, this is not a "no selection" scenario
+    if range.length != 0 {
+        unsafe { CFRelease(element); }
+        return Err("has_selection".to_string());
+    }
+
+    // Read the full text to find paragraph boundaries
+    let full_text = match read_element_value_text(element) {
+        Some(t) if !t.is_empty() => t,
+        _ => {
+            unsafe { CFRelease(element); }
+            return Err("no_text_value".to_string());
+        }
+    };
+
+    let utf16: Vec<u16> = full_text.encode_utf16().collect();
+    let text_len = utf16.len() as isize;
+    let cursor = range.location.max(0).min(text_len);
+
+    // Scan backward for paragraph start (after a \n, or start of text)
+    let mut para_start = cursor;
+    while para_start > 0 {
+        if utf16[(para_start - 1) as usize] == b'\n' as u16 {
+            break;
+        }
+        para_start -= 1;
+    }
+
+    // Scan forward for paragraph end (before a \n, or end of text)
+    let mut para_end = cursor;
+    while para_end < text_len {
+        if utf16[para_end as usize] == b'\n' as u16 {
+            break;
+        }
+        para_end += 1;
+    }
+
+    let para_length = para_end - para_start;
+    if para_length == 0 {
+        unsafe { CFRelease(element); }
+        return Err("empty_paragraph".to_string());
+    }
+
+    // Extract paragraph text
+    let para_text = String::from_utf16_lossy(&utf16[para_start as usize..para_end as usize]);
+    if para_text.trim().is_empty() {
+        unsafe { CFRelease(element); }
+        return Err("empty_paragraph".to_string());
+    }
+
+    // Get visual bounds for the paragraph range
+    let bounds = get_bounds_for_range(element, para_start, para_length);
+
+    // Get leftmost x of the first line of the paragraph
+    let line_start_x = get_bounds_for_range(element, para_start, 0)
+        .map(|b| b.x);
+
+    unsafe { CFRelease(element); }
+
+    Ok(ParagraphResult {
+        text: para_text,
+        bounds,
+        line_start_x,
+        range_location: para_start,
+        range_length: para_length,
+    })
+}
+
+/// Select a text range in the currently focused element by setting AXSelectedTextRange.
+pub fn select_text_range(location: isize, length: isize) -> Result<(), String> {
+    if !is_accessibility_granted() {
+        return Err("accessibility_denied".to_string());
+    }
+
+    let element = get_focused_element()
+        .ok_or_else(|| "no_focused_element".to_string())?;
+
+    let range = CFRange { location, length };
+    unsafe {
+        let range_value = AXValueCreate(
+            K_AX_VALUE_CF_RANGE_TYPE,
+            &range as *const CFRange as *const c_void,
+        );
+        if range_value.is_null() {
+            CFRelease(element);
+            return Err("failed_to_create_range_value".to_string());
+        }
+
+        let attr = ax_attr("AXSelectedTextRange");
+        let err = AXUIElementSetAttributeValue(element, attr, range_value);
+        CFRelease(attr);
+        CFRelease(range_value);
+        CFRelease(element);
+
+        if err == K_AX_ERROR_SUCCESS {
+            Ok(())
+        } else {
+            Err(format!("set_selected_range_failed: {}", err))
+        }
+    }
 }
 
 /// Replace the selected text using clipboard + paste.

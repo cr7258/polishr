@@ -13,7 +13,7 @@ Polishr is a Grammarly-like desktop application for grammar polishing and transl
 The app has **three windows** in a single Tauri process:
 
 1. **Floating Panel** (`main` window) — compact, transparent, always-on-top panel near the selection. Shows explanation + diff + accept/copy actions. Appears on `Cmd+Option+P`. Auto-dismisses on focus loss.
-2. **Selection Trigger** (`trigger` window) — tiny always-on-top circular button shown near selected text. Clicking it opens the floating panel without pressing a shortcut.
+2. **Selection Trigger** (`trigger` window) — always-on-top button/line shown near text. Has two modes: **Selection mode** (blue button near selected text) and **Paragraph mode** (gray vertical line next to the paragraph when cursor is in a text field without selection; turns into a white button on hover). Clicking opens the floating panel.
 3. **Desktop Settings** (`settings` window) — full settings window with sidebar navigation. Configures API providers, views history, sets preferences. Opens from tray menu.
 
 ## Tech Stack
@@ -85,8 +85,8 @@ polishr/
 │   └── src/
 │       ├── main.rs               # Entry point
 │       ├── lib.rs                # Tauri app setup, hotkey handler, trigger poller, window positioning, blur-dismiss
-│       ├── ax_text.rs            # macOS AX API FFI (read selected text, get bounds) + clipboard/paste helpers
-│       ├── commands.rs           # capture, cached selection open, replace_text, dismiss, permission check
+│       ├── ax_text.rs            # macOS AX API FFI (read selected text, get bounds, paragraph detection, select range) + clipboard/paste helpers
+│       ├── commands.rs           # capture, cached selection/paragraph open, replace_text, dismiss, permission check
 │       └── tray.rs               # System tray: "Settings" opens desktop window, "Quit" exits
 └── .cursor/
     └── rules/
@@ -99,7 +99,12 @@ polishr/
 The floating panel, selection trigger, and desktop settings share a single Tauri process. `main.tsx` checks `getCurrentWindow().label` to decide which React tree to render. Data is shared via `tauri-plugin-store` (two store files: `settings.json` for providers/preferences, `history.json` for records).
 
 ### Passive selection trigger (Grammarly-style)
-On macOS, a background poller in `lib.rs` checks current AX selection roughly every 350ms. Polling uses a lightweight AX read path (`peek_selection_ax`) that skips frontmost-app storage. If valid selected text exists and the main panel is not visible, it positions the `trigger` window to the left of the selection and shows it. Clicking the trigger calls `open_main_from_cached_selection`, which reuses cached capture data to open `main` without re-capturing after focus shift.
+On macOS, a background poller in `lib.rs` checks current AX selection roughly every 350ms. Polling uses a lightweight AX read path (`peek_selection_ax`) that skips frontmost-app storage. The trigger has two modes:
+
+- **Selection mode**: If valid selected text exists, shows a blue button to the left of the selection. Single-line selections get a circle (`rounded-full`), multi-line selections get a pill shape (`rounded-[8px]`). The trigger window height matches the selection height. Clicking calls `open_main_from_cached_selection`.
+- **Paragraph mode**: If no text is selected but the cursor is in a text field, detects the current paragraph (newline-delimited) via `peek_paragraph_ax()`. Shows a thin gray vertical line (4px) alongside the paragraph. On hover, it expands to a white button with a chevron. Clicking calls `select_paragraph_and_open`, which uses `AXUIElementSetAttributeValue` to set `AXSelectedTextRange` on the focused element, then opens the main panel.
+
+Mode changes are communicated to the frontend via the `trigger-mode` Tauri event (`"selection"` or `"paragraph"`).
 
 ### Provider system
 Instead of a single API config, providers are stored as an array in the store. Each has `{id, name, endpoint, apiKey, model, temperature}`. One is marked as `activeProviderId`. Built-in presets: DeepSeek, OpenAI, OpenRouter, MiniMax. Legacy flat config is auto-migrated on first load.
@@ -120,9 +125,9 @@ Every successful polish saves a `HistoryRecord` to `history.json` via `useHistor
 All prompts instruct the LLM to output a short explanation (first line, under 8 words) followed by a blank line, then the polished text. `usePolish.ts` parses this at stream completion via `parseResponse()`.
 
 ### System-wide flow
-1. User selects text in any app
-2. User either presses `Cmd+Option+P` or clicks the small `trigger` button shown near the selection
-3. Rust backend uses AX API to read selected text + bounds (or cached selection from the poller) and opens `main` above the selection
+1. User selects text in any app (or places cursor in a paragraph)
+2. User either presses `Cmd+Option+P`, clicks the blue `trigger` button near the selection, or hovers the gray paragraph line and clicks the white button
+3. Rust backend uses AX API to read selected text + bounds (or cached selection/paragraph from the poller) and opens `main` above the selection
 4. Floating panel auto-polishes via LLM; user reviews the diff and clicks Accept/Copy or enters "Ask for a change"
 5. Panel hides, replacement text is copied to clipboard, original app is activated, Cmd+V simulated
 6. History record saved automatically
